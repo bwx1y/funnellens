@@ -1,0 +1,1 @@
+ALTER TABLE "users" ALTER COLUMN "is_verified" SET DATA TYPE timestamp with time zone;
