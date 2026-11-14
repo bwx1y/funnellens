@@ -48,7 +48,8 @@ export class QueueManager<
     }
 }
 
-export class WorkerManager<TData = any, TResult = any, TName extends string = string> {
+export class WorkerManager<TData = unknown, TResult = unknown, TName extends string = string> {
+    private static readonly instances: Set<WorkerManager<unknown, unknown, string>> = new Set();
     private readonly worker: Worker<TData, TResult, TName>;
 
     constructor(queueName: string, processor: (job: Job<TData, TResult, TName>) => Promise<TResult>, options?: WorkerOptions) {
@@ -57,6 +58,8 @@ export class WorkerManager<TData = any, TResult = any, TName extends string = st
             ...options,
         });
 
+        WorkerManager.instances.add(this);
+
         this.worker.on("completed", (job) => {
             logger.info(`[Worker] Job #${job.id} (${job.name}) selesai diproses.`);
         });
@@ -64,5 +67,26 @@ export class WorkerManager<TData = any, TResult = any, TName extends string = st
         this.worker.on("failed", (job, err) => {
             logger.error(`[Worker] Job #${job?.id} (${job?.name}) gagal: ${err.message}`);
         });
+    }
+
+    get instance(): Worker<TData, TResult, TName> {
+        return this.worker;
+    }
+
+    async close(force: boolean = false): Promise<void> {
+        WorkerManager.instances.delete(this);
+        await this.worker.close(force);
+    }
+
+    static async closeAll(force: boolean = false): Promise<void> {
+        const instances = Array.from(WorkerManager.instances);
+        logger.info(`[WorkerManager] Closing ${instances.length} active worker(s) (force=${force})...`);
+        const results = await Promise.allSettled(instances.map((w) => w.close(force)));
+        for (const res of results) {
+            if (res.status === "rejected") {
+                logger.error(`[WorkerManager] Failed to close worker: ${res.reason?.message ?? res.reason}`);
+            }
+        }
+        logger.info(`[WorkerManager] All workers closed.`);
     }
 }

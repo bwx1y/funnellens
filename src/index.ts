@@ -4,6 +4,9 @@ import {AppError} from "@/utils/error";
 import {Config} from "@/config";
 import {routes} from "@/routes";
 import {httpLogger} from "@/plugins/loger.plugin";
+import {WorkerManager} from "@/utils/queue";
+import {redisConnection} from "@/utils/redis";
+import {logger} from "@/utils/logger";
 
 // Dynamic discovery of worker files across feature modules
 const workerGlob = new Bun.Glob("./modules/**/worker.ts");
@@ -65,6 +68,11 @@ if (Config.application.mode == "development") {
         provider: "scalar",
         path: "/docs",
         documentation: {
+            info: {
+                title: "Funnel Lens API",
+                version: "1.0.50",
+                description: "Dokumentasi API WhatsApp Funnel & Lead Classifier",
+            },
             components: {
                 securitySchemes: {
                     bearerAuth: {
@@ -78,11 +86,44 @@ if (Config.application.mode == "development") {
     }))
 }
 
-app.listen({
-    port: Config.application.port,
-    hostname: "0.0.0.0"
-});
+if (Config.application.mode !== "test") {
+    app.listen({
+        port: Config.application.port,
+        hostname: "0.0.0.0"
+    });
 
-console.log(
-    `🦊 Elysia is running at ${app.server?.hostname}:${app.server?.port}`
-);
+    console.log(
+        `🦊 Elysia is running at ${app.server?.hostname}:${app.server?.port}`
+    );
+
+    let isShuttingDown = false;
+
+    const shutdown = async (signal: string) => {
+        if (isShuttingDown) return;
+        isShuttingDown = true;
+        logger.info(`Received ${signal}. Starting graceful shutdown...`);
+
+        const forceTimer = setTimeout(async () => {
+            logger.error("Shutdown timed out. Forcing process exit.");
+            await WorkerManager.closeAll(true).catch(() => {});
+            process.exit(1);
+        }, 10000);
+        forceTimer.unref();
+
+        try {
+            app.server?.stop();
+            await WorkerManager.closeAll(false);
+            await redisConnection.quit();
+            logger.info("Graceful shutdown completed.");
+            process.exit(0);
+        } catch (err: unknown) {
+            const msg = err instanceof Error ? err.message : String(err);
+            logger.error(`Error during shutdown: ${msg}`);
+            process.exit(1);
+        }
+    };
+
+    process.on("SIGINT", () => shutdown("SIGINT"));
+    process.on("SIGTERM", () => shutdown("SIGTERM"));
+}
+
