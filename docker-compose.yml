@@ -27,6 +27,9 @@ services:
       - SMTP_PASS=${SMTP_PASS:-}
       - SMTP_SECURE=${SMTP_SECURE:-false}
       - MAIL_FROM=${MAIL_FROM:-noreply@example.com}
+      - OPEN_WA_URL=http://open_wa:2785
+      - OPEN_WA_APP_KEY=${OPEN_WA_APP_KEY:-}
+      - OPEN_WA_WEBHOOK_URL=${OPEN_WA_WEBHOOK_URL:-http://host.docker.internal:3000/api/wa/webhook}
     volumes:
       - ./log:/app/log
     depends_on:
@@ -67,11 +70,15 @@ services:
     image: rmyndharis/openwa:latest
     container_name: funnel-lens-openwa
     restart: unless-stopped
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     ports:
       - "${OPEN_WA_PORT:-2785}:2785"
     environment:
       - SERVE_DASHBOARD=false
       - ENABLE_SWAGGER=true
+      # webhook delivery back to the ho\st Elysia; the SSRF guard blocks private targets otherwise
+      - SSRF_ALLOWED_HOSTS=host.docker.internal
     volumes:
       - open_wa_data:/app/data
     healthcheck:
@@ -80,6 +87,10 @@ services:
       timeout: 5s
       retries: 5
       start_period: 30s
+
+models:
+  qwen:
+    model: hf.co/unsloth/Qwen3.5-0.8B-GGUF:Q8_0
 
 volumes:
   postgres_data:

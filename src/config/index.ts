@@ -32,5 +32,8 @@ export const Config = {
     openWa: {
         url: getEnv("OPEN_WA_URL", "localhost"),
         appKey: getEnv("OPEN_WA_APP_KEY", "localhost"),
+        // Must be reachable from the OpenWA container, not from the host: host.docker.internal is the
+        // host-gateway alias configured under open_wa.extra_hosts in docker-compose.yml.
+        webhookUrl: getEnv("OPEN_WA_WEBHOOK_URL", "http://host.docker.internal:3000/api/wa/webhook"),
     }
 };
