@@ -9,9 +9,12 @@ Backend REST API multi-tenant menggunakan [Bun](https://bun.sh), [Elysia](https:
 - Manajemen user per tenant (khusus `ADMIN`)
 - Verifikasi email dan reset password via OTP/token
 - Manajemen sesi WhatsApp via OpenWA (buat sesi, ambil QR login, update, hapus)
-- Webhook OpenWA: `session.authenticated` menyinkronkan status sesi, `session.disconnected` menandai sesi terputus dan mengirim email notifikasi ke seluruh user `ADMIN` tenant terkait
+- Webhook OpenWA: `session.authenticated` menyinkronkan status sesi, `session.disconnected` menandai sesi terputus dan mengirim email notifikasi ke admin, serta `message.received` untuk klasifikasi pesan via AI
+- Klasifikasi prospek otomatis berbasis AI lokal via Ollama (kategori `HOT`, `WARM`, `COLD`)
+- Manajemen kontak dan statistik prospek WhatsApp (`/api/contact`)
 - Hashing password (native `Bun.password` bcrypt)
-- Antrean background job via BullMQ & Redis (`email-queue`, `queue-session-wa`)
+- Antrean background job via BullMQ & Redis (`email-queue`, `queue-session-wa`, `WaWebhook-Chat`)
+- Graceful shutdown untuk HTTP server, worker BullMQ, dan Redis client (`SIGINT`/`SIGTERM`)
 - Validasi request TypeBox via Elysia schema
 - Logging HTTP terstruktur via `pino` (console & file rotation otomatis di `log/` max 5MB via `pino-roll`)
 - Dokumentasi API interaktif via Scalar OpenAPI (`/docs`)
@@ -82,7 +85,7 @@ Server berjalan di `http://localhost:3000`. Worker (`src/modules/**/worker.ts`) 
 
 ## Menjalankan dengan Docker
 
-Jalankan seluruh stack (API, PostgreSQL, Redis, OpenWA) dengan Docker Compose:
+Jalankan seluruh stack (API, PostgreSQL, Redis, OpenWA, Ollama) dengan Docker Compose:
 
 ```bash
 # Jalankan container di background
@@ -144,11 +147,16 @@ Semua respons memakai bentuk `{ status: boolean, message?: string, ...data }`. E
 | `PUT` | `/api/wa/session/:id` | Bearer | Update sesi |
 | `DELETE` | `/api/wa/session/:id` | Bearer | Hapus sesi |
 
+#### Kontak WhatsApp (`/api/contact`)
+| Method | Endpoint | Auth | Deskripsi |
+|---|---|---|---|
+| `GET` | `/api/contact` | Bearer | List kontak pelanggan per tenant (opsional filter `sessionId`) |
+| `GET` | `/api/contact/stats` | Bearer | Statistik persentase prospek (`COLD`, `WARM`, `HOT`) per tenant |
+
 #### Webhook OpenWA (`/api/wa/webhook`)
 | Method | Endpoint | Auth | Deskripsi |
 |---|---|---|---|
 | `POST` | `/api/wa/webhook` | Publik | Penerima delivery event dari gateway OpenWA |
-
 Body mengikuti `WebhookDelivery` dari SDK OpenWA:
 
 ```json
@@ -165,7 +173,7 @@ Body mengikuti `WebhookDelivery` dari SDK OpenWA:
 Perilaku per event:
 - `session.authenticated` — set `status = ready`, isi `phone_number` dan `phone_name` sesi.
 - `session.disconnected` — set `status = disconnected`, lalu enqueue job `send-session-disconnected` ke `email-queue` untuk semua user `ADMIN` tenant pemilik sesi. `jobId` diisi dari `idempotencyKey`, jadi retry delivery yang sama tidak mengirim email ganda. Sesi tak dikenal, tenant kosong, atau tenant tanpa admin hanya menghasilkan log `warn` (endpoint tetap `{"status":true}`).
-
+- `message.received` — hanya memproses pesan masuk dari pelanggan (`!fromMe`), enqueue job ke antrean `WaWebhook-Chat` untuk diklasifikasi oleh AI worker via Ollama (`HOT`/`WARM`/`COLD`), kemudian disimpan ke riwayat pesan `wa_message`.
 Email notifikasi memakai template `src/utils/mail/template/session-disconnected.html` dengan subject `Sesi WhatsApp "<nama sesi>" terputus`.
 
 ---
@@ -200,7 +208,8 @@ src/
 │   ├── user/       # Route, schema, & service manajemen user tenant
 │   └── wa/
 │       ├── session/ # Route, schema, service, & worker registrasi webhook OpenWA
-│       └── webhook/ # Route & service penerima event OpenWA
+│       ├── contact/ # Route, schema, & service kontak & audience stats
+│       └── webhook/ # Route, schema, service, & worker klasifikasi pesan AI OpenWA
 ├── plugins/        # Plugin Elysia (httpLogger)
 ├── utils/
 │   ├── error/      # AppError & subclass (BadRequest, Unauthorized, Forbidden, NotFound, Conflict)
@@ -208,7 +217,8 @@ src/
 │   ├── logger/     # pino + pino-roll
 │   ├── mail/       # MailUtil & template HTML
 │   ├── password/   # PasswordUtil (Bun.password)
-│   ├── queue/      # QueueManager & WorkerManager (BullMQ)
+│   ├── queue/      # QueueManager & WorkerManager (BullMQ) + registry shutdown
+│   ├── ollama/     # Client Ollama, structured output, prompt rules & few-shot
 │   └── redis/      # Koneksi ioredis bersama
 ├── routes.ts       # Agregasi route utama (/api)
 └── index.ts        # Entrypoint server, error handler, auto-load worker, listener
