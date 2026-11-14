@@ -1,0 +1,27 @@
+{
+  "type": "object",
+  "properties": {
+    "lead_type": {
+      "type": "string",
+      "enum": ["HOT", "WARM", "COLD"]
+    },
+    "confidence_score": {
+      "type": "number",
+      "description": "Tingkat keyakinan klasifikasi dari 0.0 hingga 1.0"
+    },
+    "detected_product": {
+      "type": ["string", "null"],
+      "description": "Nama produk dari katalog yang disebut pelanggan, atau null jika belum ada"
+    },
+    "reasoning": {
+      "type": "string",
+      "description": "Alasan singkat pemilihan kategori lead_type"
+    }
+  },
+  "required": [
+    "lead_type",
+    "confidence_score",
+    "detected_product",
+    "reasoning"
+  ]
+}

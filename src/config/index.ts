@@ -35,5 +35,9 @@ export const Config = {
         // Must be reachable from the OpenWA container, not from the host: host.docker.internal is the
         // host-gateway alias configured under open_wa.extra_hosts in docker-compose.yml.
         webhookUrl: getEnv("OPEN_WA_WEBHOOK_URL", "http://host.docker.internal:3000/api/wa/webhook"),
+    },
+    ollama: {
+        baseUrl: getEnv("OLLAMA_BASE_URL", "http://localhost:11434"),
+        model: getEnv("OLLAMA_MODEL", "qwen2.5:0.5b"),
     }
 };

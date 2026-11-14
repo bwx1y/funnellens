@@ -7,6 +7,7 @@
       "dependencies": {
         "@elysia/openapi": "^1.4.17",
         "@rmyndharis/openwa": "^0.11.0",
+        "@toon-format/toon": "^4.4.0",
         "@types/pg": "^8.23.1",
         "bullmq": "^6.7.1",
         "drizzle-kit": "^0.31.11",
@@ -16,6 +17,7 @@
         "ioredis": "^6.0.0",
         "jose": "^6.2.15",
         "nodemailer": "^10.3.1",
+        "ollama": "^0.6.4",
         "pg": "^8.23.1",
         "pino": "^10.4.0",
         "pino-pretty": "^13.2.0",
@@ -114,6 +116,8 @@
     "@tokenizer/inflate": ["@tokenizer/inflate@0.6.0", "", { "dependencies": { "debug": "^4.4.3", "strtok3": "^10.6.2", "token-types": "^6.1.2" } }, "sha512-+0RDxhBkyT9xMnGdJAwmats9yxRLR8ypJrQgrnLqOu4Gv/aHlnxYgdGVy2QTwvBl6IF/w2Hr+ZNirH+iMUbVZA=="],
 
     "@tokenizer/token": ["@tokenizer/token@0.3.0", "", {}, "sha512-OvjF+z51L3ov0OyAU0duzsYuvO01PH7x4t6DJx+guahgTnBHkhJdG7soQeTSFLWN3efnHyibZ4Z8l2EuWwJN3A=="],
+
+    "@toon-format/toon": ["@toon-format/toon@4.4.0", "", {}, "sha512-A6UcsVoWbNdhdLNhJbe6JpRlocmf/DZGG57fur3bd8oQtsjBaKWo2hHbOU2zTuy+byUmLIOyP1xJeitopCZzpQ=="],
 
     "@types/node": ["@types/node@26.6.6", "", { "dependencies": { "undici-types": "~8.9.0" } }, "sha512-MzQj+8Kx3XI40OmUAE6Qoh58ZMNstNNMwn2nfd3qWsfe7nDNSqJNzes4njhz6AHwrSHOffSLwXU6yb474Q4aog=="],
 
@@ -241,6 +245,8 @@
 
     "nodemailer": ["nodemailer@10.3.1", "", {}, "sha512-uF0AFsJC07Y1vdW7p580DKAnh7rAO+4UPSSB3mDCPNDufoiaOebV6JmrzpxB14OjEEEiBsNdYoM2Y+fN8M7BBA=="],
 
+    "ollama": ["ollama@0.6.4", "", { "dependencies": { "whatwg-fetch": "^3.6.20" } }, "sha512-KzM6b5Sq0TgipeMTdImuELr/V4eNqrTf37PRzUTHCPPieFmboYw6qPn+pX7+lg0nSP1jsKwy4AFkiQFXhqHeZA=="],
+
     "on-exit-leak-free": ["on-exit-leak-free@2.1.2", "", {}, "sha512-0eJJY6hXLGf1udHwfNftBqH+g73EU4B504nZeKpz1sYRKafAghwxEJunB2O7rDZkL4PGfsMVnTXZ2EjibbqcsA=="],
 
     "once": ["once@1.4.0", "", { "dependencies": { "wrappy": "1" } }, "sha512-lNaJgI+2Q5URQBkccEKHTQOPaXdUxnZZElQTZY0MFUAuaEqe1E+Nyvgdz/aIyNi6Z9MzO5dv1H8n58/GELp3+w=="],
@@ -328,6 +334,8 @@
     "uint8array-extras": ["uint8array-extras@1.6.0", "", {}, "sha512-8iAasVS4wUx0gPLjH8Xtz2PeDzTSiy8QiLGu2DT3X5GU+egFEQhpnbtkehbAwjvDcxIERmCYcysiODFmE3Ud0Q=="],
 
     "undici-types": ["undici-types@8.9.0", "", {}, "sha512-KTDyRTYX8sWmKXAikPHHSyc63CRPETMctyjKFupcC6OBLXT3xsN0e9aF7m+mIXutFWpUXuedtowG7iLOzp0kQg=="],
+
+    "whatwg-fetch": ["whatwg-fetch@3.6.20", "", {}, "sha512-EqhiFU6daOA8kpjOWTL0olhVOF3i7OrFzSYiGsEMB8GcXS+RrzauAERX65xMeNWVqxA6HXH2m69Z9LaKKdisfg=="],
 
     "wrappy": ["wrappy@1.0.2", "", {}, "sha512-l4Sp/DRseor9wL6EvV2+TuQn63dMkPjZ/sp9XkghTEbV9KlPS1xUsZ3u7/IQO4wxtcFB4bgpQPRcR3QCvezPcQ=="],
 

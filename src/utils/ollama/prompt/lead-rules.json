@@ -1,0 +1,21 @@
+{
+  "rules": {
+    "COLD": {
+      "definition": "Pesan berisi kata kotor/umpatan, penghinaan, spam, sapaan saja, basa-basi, atau tidak menyebut produk dari katalog.",
+      "examples": ["halo", "p", "permisi", "goblok", "tolol", "anjing", "bangsat", "bulpoint goblok"]
+    },
+    "WARM": {
+      "definition": "Pelanggan menyebut atau menanyakan produk yang ADA di dalam KATALOG PRODUK secara sopan/netral, tetapi BELUM menyatakan jumlah pesanan atau transaksi.",
+      "examples": ["apakah bulpoint ada", "bulpoint", "info bulpoint", "bulpoint berapaan?"]
+    },
+    "HOT": {
+      "definition": "Pelanggan menunjukkan niat transaksi serius: menyebutkan jumlah pembelian, meminta format order, menanyakan ongkir ke tujuan, atau meminta metode pembayaran.",
+      "examples": ["mau pesan bulpoint 5", "beli bulpoint 1 minta rek bca", "ongkir bulpoint ke malang berapa?"]
+    }
+  },
+  "constraints": [
+    "PRIORITAS UTAMA: Jika pesan mengandung kata kotor, umpatan, makian, atau bahasa kasar (seperti goblok, tolol, anjing, babi, bangsat, kontol, memek, dll), WAJIB klasifikasikan sebagai COLD dengan confidence_score di bawah 0.3, MESKIPUN pelanggan menyebut nama produk dari katalog.",
+    "Jika pesan sopan/netral dan menyebut produk yang ADA di KATALOG PRODUK tanpa niat order/bayar, klasifikasikan sebagai WARM.",
+    "Jika pelanggan hanya menyapa atau tidak menyebut item dari katalog, klasifikasikan sebagai COLD."
+  ]
+}

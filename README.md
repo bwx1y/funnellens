@@ -54,6 +54,9 @@ cp .env.example .env
 | `OPEN_WA_APP_KEY` | - | API key OpenWA |
 | `OPEN_WA_WEBHOOK_URL` | `http://host.docker.internal:3000/api/wa/webhook` | URL webhook yang didaftarkan ke OpenWA; harus terjangkau dari container gateway, bukan dari host |
 | `OPEN_WA_PORT` | `2785` | Hanya dipakai `docker-compose.yml` untuk publish port gateway |
+| `OLLAMA_BASE_URL` | `http://localhost:11434` | URL endpoint Ollama API (di compose: `http://ollama:11434`) |
+| `OLLAMA_MODEL` | `qwen2.5:0.5b` | Nama model AI Ollama yang digunakan |
+| `OLLAMA_PORT` | `11434` | Port publish container Ollama pada `docker-compose.yml` |
 
 3. Setup database:
 ```bash

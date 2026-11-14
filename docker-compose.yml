@@ -30,6 +30,8 @@ services:
       - OPEN_WA_URL=http://open_wa:2785
       - OPEN_WA_APP_KEY=${OPEN_WA_APP_KEY:-}
       - OPEN_WA_WEBHOOK_URL=${OPEN_WA_WEBHOOK_URL:-http://host.docker.internal:3000/api/wa/webhook}
+      - OLLAMA_BASE_URL=http://ollama:11434
+      - OLLAMA_MODEL=${OLLAMA_MODEL:-qwen2.5:0.5b}
     volumes:
       - ./log:/app/log
     depends_on:
@@ -88,11 +90,32 @@ services:
       retries: 5
       start_period: 30s
 
-models:
-  qwen:
-    model: hf.co/unsloth/Qwen3.5-0.8B-GGUF:Q8_0
+  ollama:
+    image: ollama/ollama:latest
+    container_name: funnel-lens-ollama
+    restart: unless-stopped
+    ports:
+      - "${OLLAMA_PORT:-11434}:11434"
+    environment:
+      - OLLAMA_KEEP_ALIVE=24h
+      - OLLAMA_MODEL=${OLLAMA_MODEL:-qwen2.5:0.5b}
+    volumes:
+      - ollama_data:/root/.ollama
+    entrypoint:
+      - /bin/sh
+      - -c
+      - |
+        /bin/ollama serve &
+        pid=$$!
+        until /bin/ollama list > /dev/null 2>&1; do
+          sleep 1
+        done
+        echo "Pulling model $${OLLAMA_MODEL}..."
+        /bin/ollama pull "$${OLLAMA_MODEL}"
+        wait $$pid
 
 volumes:
   postgres_data:
   redis_data:
   open_wa_data:
+  ollama_data:

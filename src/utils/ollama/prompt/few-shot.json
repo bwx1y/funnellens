@@ -1,0 +1,42 @@
+[
+  {
+    "role": "user",
+    "content": "halo"
+  },
+  {
+    "role": "assistant",
+    "content": "{\"reasoning\":\"Pelanggan hanya menyapa dan tidak menyebut item apa pun dari katalog.\",\"detected_product\":null,\"lead_type\":\"COLD\",\"confidence_score\":0.96}"
+  },
+  {
+    "role": "user",
+    "content": "goblok"
+  },
+  {
+    "role": "assistant",
+    "content": "{\"reasoning\":\"Pesan mengandung kata kotor/umpatan sehingga tidak dianggap sebagai prospek serius.\",\"detected_product\":null,\"lead_type\":\"COLD\",\"confidence_score\":0.2}"
+  },
+  {
+    "role": "user",
+    "content": "bulpoint anjing mahal banget"
+  },
+  {
+    "role": "assistant",
+    "content": "{\"reasoning\":\"Meskipun menyebut produk 'bulpoint', pesan mengandung kata kotor/umpatan sehingga wajib masuk kategori COLD.\",\"detected_product\":\"bulpoint\",\"lead_type\":\"COLD\",\"confidence_score\":0.25}"
+  },
+  {
+    "role": "user",
+    "content": "apakah bulpoint ada"
+  },
+  {
+    "role": "assistant",
+    "content": "{\"reasoning\":\"Pelanggan menanyakan produk 'bulpoint' yang terdaftar di katalog secara netral tanpa niat order.\",\"detected_product\":\"bulpoint\",\"lead_type\":\"WARM\",\"confidence_score\":0.95}"
+  },
+  {
+    "role": "user",
+    "content": "mau order bulpoint 2 pcs, bayar kemana?"
+  },
+  {
+    "role": "assistant",
+    "content": "{\"reasoning\":\"Pelanggan menyebut produk katalog 'bulpoint' beserta jumlah pesanan dan menanyakan metode pembayaran.\",\"detected_product\":\"bulpoint\",\"lead_type\":\"HOT\",\"confidence_score\":0.98}"
+  }
+]
