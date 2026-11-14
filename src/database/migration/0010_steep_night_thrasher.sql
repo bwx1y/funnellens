@@ -1,0 +1,1 @@
+ALTER TABLE "wa_message" ALTER COLUMN "score" SET DATA TYPE real;

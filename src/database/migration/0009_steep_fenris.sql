@@ -1,0 +1,1 @@
+ALTER TABLE "wa_message" ADD COLUMN "score" integer;

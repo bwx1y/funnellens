@@ -57,6 +57,27 @@
       "when": 1794551306652,
       "tag": "0007_easy_killraven",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1794631163899,
+      "tag": "0008_reflective_nocturne",
+      "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1794631632610,
+      "tag": "0009_steep_fenris",
+      "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1794633671071,
+      "tag": "0010_steep_night_thrasher",
+      "breakpoints": true
     }
   ]
 }
