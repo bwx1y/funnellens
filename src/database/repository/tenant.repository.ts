@@ -13,6 +13,15 @@ export class TenantRepository extends DatabaseRepository {
         return entity ?? null;
     }
 
+    async findOneById(id: string) {
+        const [entity] = await this.database.select()
+            .from(TenantEntity)
+            .where(eq(TenantEntity.id, id))
+            .limit(1)
+
+        return entity ?? null;
+    }
+
     async create(tenant: typeof TenantEntity.$inferInsert) {
         const [entity] = await this.database.insert(TenantEntity)
             .values(tenant)

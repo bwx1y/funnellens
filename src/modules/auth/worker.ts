@@ -9,12 +9,40 @@ export interface SendEmailTokenJob {
     code: string;
 }
 
-export const emailWorker = new WorkerManager<SendEmailTokenJob>(AuthService.QUEUE_NAME, async (job) => {
-    const {type, to, name, code} = job.data;
-    const isVerification = type === "verification";
+export interface SendSessionDisconnectedJob {
+    type: "session-disconnected";
+    to: string;
+    tenantName: string;
+    sessionName: string;
+    reason: string;
+    disconnectedAt: string;
+}
+
+export type SendEmailJob = SendEmailTokenJob | SendSessionDisconnectedJob;
+
+export const emailWorker = new WorkerManager<SendEmailJob>(AuthService.QUEUE_NAME, async (job) => {
+    const data = job.data;
+
+    if (data.type === "session-disconnected") {
+        const html = await MailUtil.renderFile("session-disconnected.html", {
+            tenantName: data.tenantName,
+            sessionName: data.sessionName,
+            reason: data.reason,
+            disconnectedAt: data.disconnectedAt,
+        });
+
+        await MailUtil.send({
+            to: data.to,
+            subject: `Sesi WhatsApp "${data.sessionName}" terputus`,
+            html,
+        });
+        return;
+    }
+
+    const isVerification = data.type === "verification";
     const template = isVerification ? "verification.html" : "reset-password.html";
     const subject = isVerification ? "Verifikasi Email" : "Reset Password";
 
-    const html = await MailUtil.renderFile(template, {name, code});
-    await MailUtil.send({to, subject, html});
+    const html = await MailUtil.renderFile(template, {name: data.name, code: data.code});
+    await MailUtil.send({to: data.to, subject, html});
 });
