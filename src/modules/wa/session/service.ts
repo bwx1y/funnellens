@@ -5,13 +5,17 @@ import {Config} from "@/config";
 import {WaSessionRepository} from "@/database/repository/wa-session.repository";
 import {NotFoundError} from "@/utils/error";
 import {logger} from "@/utils/logger";
+import {QueueManager} from "@/utils/queue";
 
 export class WaSessionService {
+    static readonly QUEUE_NAME = "queue-session-wa";
+
     private readonly waSessionRepository = new WaSessionRepository();
     private readonly openWa = new OpenWAClient({
         baseUrl: Config.openWa.url,
         apiKey: Config.openWa.appKey
     });
+    private readonly setupSessionQueue = new QueueManager<{ code: string }>(WaSessionService.QUEUE_NAME)
 
     async findAll(tenantId: string) {
         return this.waSessionRepository.findAllByTenantId(tenantId);
@@ -27,7 +31,15 @@ export class WaSessionService {
     }
 
     async findQrCode(tenantId: string, id: string) {
-        await this.findOne(tenantId, id);
+        // ponytail: tenant ownership check only; gateway status is the source of truth, since the DB row is not synced after start.
+        const result = await this.findOne(tenantId, id);
+
+        if (result.status == "created") {
+            await this.openWa.sessions.start(id);
+            await this.waSessionRepository.update(id, {
+                status: "ready"
+            });
+        }
 
         const qr = await this.openWa.sessions.getQrCode(id);
 
@@ -40,6 +52,8 @@ export class WaSessionService {
         const request = await this.openWa.sessions.create({
             name: `${tenantId}-${body.name}`
         })
+
+        await this.setupSessionQueue.add("create", {code: request.id})
 
         return this.waSessionRepository.create({
             id: request.id,

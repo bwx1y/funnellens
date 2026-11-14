@@ -14,14 +14,6 @@ export const WaSessionSchema = {
             maxLength: 150,
             error: "name maximum 150 characters"
         })),
-        phoneNumber: t.Optional(t.String({
-            maxLength: 32,
-            error: "phone number maximum 32 characters"
-        })),
-        phoneName: t.Optional(t.String({
-            maxLength: 150,
-            error: "phone name maximum 150 characters"
-        }))
     }),
     params: t.Object({
         id: t.String({
