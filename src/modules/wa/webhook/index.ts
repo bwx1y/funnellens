@@ -3,6 +3,7 @@ import {BadRequestError} from "@/utils/error";
 import {logger} from "@/utils/logger";
 import type {WebhookDelivery} from "@rmyndharis/openwa";
 import {WaWebhookService} from "@/modules/wa/webhook/service";
+import {MessageReceived} from "@/modules/wa/webhook/schema";
 
 export const WaWebhookController = new Elysia({
     prefix: "/wa/webhook",
@@ -33,12 +34,21 @@ export const WaWebhookController = new Elysia({
                     idempotencyKey: payload.idempotencyKey,
                 });
             }
+
+            if (payload.event == "message.received") {
+                await waWebhookService.messageReceived(payload.sessionId, payload.data as MessageReceived);
+            }
         } catch {
             logger.warn({raw: raw.slice(0, 500)}, "OpenWA webhook: invalid JSON body");
             throw new BadRequestError("Invalid JSON body");
         }
 
-        logger.info({payload}, "OpenWA webhook received");
+        // logger.info({payload}, "OpenWA webhook received");
 
         return {status: true};
+    }, {
+        detail: {
+            summary: "Handle OpenWA webhook event delivery",
+            description: "Receives and processes incoming OpenWA events (session.authenticated, session.disconnected, message.received)."
+        }
     });

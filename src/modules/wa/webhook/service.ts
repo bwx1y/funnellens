@@ -5,12 +5,16 @@ import {QueueManager} from "@/utils/queue";
 import {logger} from "@/utils/logger";
 import {AuthService} from "@/modules/auth/service";
 import type {SendSessionDisconnectedJob} from "@/modules/auth/worker";
+import {MessageReceived} from "@/modules/wa/webhook/schema";
 
 export class WaWebhookService {
+    static readonly QUEUE_NAME = "WaWebhook-Chat";
+
     private readonly waSessionRepository = new WaSessionRepository();
     private readonly userRepository = new UserRepository();
     private readonly tenantRepository = new TenantRepository();
     private readonly emailQueue = new QueueManager<SendSessionDisconnectedJob>(AuthService.QUEUE_NAME);
+    private readonly chatQueue = new QueueManager<MessageReceived & { session: string }>(WaWebhookService.QUEUE_NAME)
 
     async authenticated(body: { sessionId: string, phone: string, pushName: string }) {
         await this.waSessionRepository.update(body.sessionId, {
@@ -37,7 +41,10 @@ export class WaWebhookService {
         const admins = (await this.userRepository.findAllByTenantId(session.tenantId))
             .filter((user) => user.role === "ADMIN");
         if (admins.length === 0) {
-            logger.warn({sessionId: session.id, tenantId: session.tenantId}, "OpenWA webhook: tenant has no admin, skip email");
+            logger.warn({
+                sessionId: session.id,
+                tenantId: session.tenantId
+            }, "OpenWA webhook: tenant has no admin, skip email");
             return;
         }
 
@@ -51,5 +58,12 @@ export class WaWebhookService {
             reason: body.reason?.trim() || "Tidak diketahui",
             disconnectedAt: new Date().toISOString(),
         }, body.idempotencyKey ? {jobId: body.idempotencyKey} : undefined);
+    }
+
+    async messageReceived(id: string, body: MessageReceived) {
+        await this.chatQueue.add("messageReceived", {
+            session: id,
+            ...body
+        })
     }
 }
