@@ -4,7 +4,8 @@ export const WaSessionSchema = {
     create: t.Object({
         name: t.String({
             minLength: 1,
-            error: "Name is required",
+            pattern: "^\\S+$",
+            error: "Name cannot contain spaces",
             required: true
         })
     }),
@@ -12,7 +13,8 @@ export const WaSessionSchema = {
         name: t.Optional(t.String({
             minLength: 1,
             maxLength: 150,
-            error: "name maximum 150 characters"
+            pattern: "^\\S+$",
+            error: "Name cannot contain spaces"
         })),
     }),
     params: t.Object({

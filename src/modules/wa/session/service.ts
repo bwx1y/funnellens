@@ -32,12 +32,12 @@ export class WaSessionService {
 
     async findQrCode(tenantId: string, id: string) {
         // ponytail: tenant ownership check only; gateway status is the source of truth, since the DB row is not synced after start.
-        const result = await this.findOne(tenantId, id);
+        const result = await this.openWa.sessions.get(id);
 
-        if (result.status == "created") {
+        if (result.status == "created" || result.status == "disconnected") {
             await this.openWa.sessions.start(id);
             await this.waSessionRepository.update(id, {
-                status: "ready"
+                status: "initializing"
             });
         }
 
