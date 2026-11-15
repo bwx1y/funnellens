@@ -7,6 +7,7 @@ import {httpLogger} from "@/plugins/loger.plugin";
 import {WorkerManager} from "@/utils/queue";
 import {redisConnection} from "@/utils/redis";
 import {logger} from "@/utils/logger";
+import {WaSessionService} from "@/modules/wa/session/service";
 
 // Dynamic discovery of worker files across feature modules
 const workerGlob = new Bun.Glob("./modules/**/worker.ts");
@@ -79,11 +80,30 @@ if (Config.application.mode == "development") {
                         type: "http",
                         scheme: "bearer",
                         bearerFormat: "JWT"
+                    },
+                    metaOAuth2: {
+                        type: "oauth2",
+                        description: "Autentikasi OAuth 2.0 untuk Meta Marketing API",
+                        flows: {
+                            authorizationCode: {
+                                authorizationUrl: `https://www.facebook.com/${Config.meta.apiVersion}/dialog/oauth`,
+                                tokenUrl: `https://graph.facebook.com/${Config.meta.apiVersion}/oauth/access_token`,
+                                scopes: {
+                                    ads_read: "Membaca laporan dan metrik performa iklan",
+                                }
+                            },
+                            implicit: {
+                                authorizationUrl: "https://www.facebook.com/v21.0/dialog/oauth",
+                                scopes: {
+                                    ads_read: "Membaca daftar kampanye dan laporan performa iklan"
+                                }
+                            }
+                        }
                     }
                 }
             }
         }
-    }))
+    }));
 }
 
 if (Config.application.mode !== "test") {
@@ -95,6 +115,12 @@ if (Config.application.mode !== "test") {
     console.log(
         `🦊 Elysia is running at ${app.server?.hostname}:${app.server?.port}`
     );
+
+    // Background check on startup: sync DB ready sessions with OpenWA
+    const waSessionService = new WaSessionService();
+    void waSessionService.syncSessionsOnStartup().catch((err) => {
+        logger.warn({err}, "[Startup] Background sync OpenWA sessions failed");
+    });
 
     let isShuttingDown = false;
 

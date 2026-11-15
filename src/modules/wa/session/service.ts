@@ -93,4 +93,26 @@ export class WaSessionService {
 
         return entity;
     }
+
+    async syncSessionsOnStartup() {
+        const readySessions = await this.waSessionRepository.findAllByStatusReady();
+        if (readySessions.length === 0) {
+            return;
+        }
+
+        for (const session of readySessions) {
+            try {
+                const remote = await this.openWa.sessions.get(session.id);
+                if (remote.status === "disconnected") {
+                    await this.openWa.sessions.start(session.id);
+                    await this.waSessionRepository.update(session.id, {
+                        status: "initializing",
+                    });
+                    logger.info({sessionId: session.id}, "[Startup] Session was disconnected on OpenWA. Restarted.");
+                }
+            } catch (error) {
+                logger.warn({error, sessionId: session.id}, "[Startup] Failed to check or restart OpenWA session");
+            }
+        }
+    }
 }

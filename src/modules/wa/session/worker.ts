@@ -1,6 +1,6 @@
 import {WorkerManager} from "@/utils/queue";
 import {WaSessionService} from "@/modules/wa/session/service";
-import {OpenWAClient, type WebhookEvent} from "@rmyndharis/openwa";
+import {OpenWAClient, type WebhookEvent, type WebhookFilters} from "@rmyndharis/openwa";
 import {Config} from "@/config";
 import {logger} from "@/utils/logger";
 
@@ -10,27 +10,45 @@ const openWa = new OpenWAClient({
 });
 
 // Receiver is the host Elysia route POST /api/wa/webhook; the gateway container addresses the host by name
-// (extra_hosts in docker-compose.yml). Every event is subscribed because the receiver only logs the payload.
+// (extra_hosts in docker-compose.yml).
 const WEBHOOK_EVENTS: WebhookEvent[] = ["message.received", "session.disconnected", "session.authenticated"];
+
+const WEBHOOK_FILTERS: WebhookFilters = {
+    conditions: [
+        {
+            field: "isGroup",
+            operator: "equals",
+            value: false,
+        },
+        {
+            field: "isStatusBroadcast",
+            operator: "equals",
+            value: false,
+        },
+    ],
+};
 
 export const WaSessionWorker = new WorkerManager<{ code: string }>(WaSessionService.QUEUE_NAME, async (job) => {
     const sessionId = job.data.code;
     const url = Config.openWa.webhookUrl;
 
-    // ponytail: dedupe by URL so a retried job cannot register the same webhook twice; move to an upsert by
-    // webhook id if per-session event sets start to differ.
     const existing = (await openWa.webhooks.list(sessionId)).find((hook) => hook.url === url);
     if (existing != null) {
-        logger.info({sessionId, webhookId: existing.id, url}, "OpenWA webhook already registered");
-        return existing;
+        const updated = await openWa.webhooks.update(sessionId, existing.id, {
+            events: WEBHOOK_EVENTS,
+            filters: WEBHOOK_FILTERS,
+        });
+        logger.info({sessionId, webhookId: existing.id, url}, "OpenWA webhook updated with group filter");
+        return updated;
     }
 
     const webhook = await openWa.webhooks.create(sessionId, {
         url,
-        events: WEBHOOK_EVENTS
+        events: WEBHOOK_EVENTS,
+        filters: WEBHOOK_FILTERS,
     });
 
-    logger.info({sessionId, webhookId: webhook.id, url}, "OpenWA webhook registered");
+    logger.info({sessionId, webhookId: webhook.id, url}, "OpenWA webhook registered with group filter");
 
     return webhook;
 });

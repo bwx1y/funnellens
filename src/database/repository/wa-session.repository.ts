@@ -3,6 +3,12 @@ import {WaSessionEntity} from "@/database/entity/wa-session.entity";
 import {eq} from "drizzle-orm";
 
 export class WaSessionRepository extends DatabaseRepository {
+    async findAllByStatusReady() {
+        return this.database.select()
+            .from(WaSessionEntity)
+            .where(eq(WaSessionEntity.status, "ready"))
+    }
+
     async findAllByTenantId(tenantId: string) {
         return this.database.select()
             .from(WaSessionEntity)
