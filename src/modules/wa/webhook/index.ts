@@ -36,7 +36,10 @@ export const WaWebhookController = new Elysia({
             }
 
             if (payload.event == "message.received") {
-                await waWebhookService.messageReceived(payload.sessionId, payload.data as MessageReceived);
+                const messageData = payload.data as MessageReceived;
+                if (!messageData.isGroup && !messageData.isStatusBroadcast) {
+                    await waWebhookService.messageReceived(payload.sessionId, messageData);
+                }
             }
         } catch {
             logger.warn({raw: raw.slice(0, 500)}, "OpenWA webhook: invalid JSON body");
