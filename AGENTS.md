@@ -67,3 +67,9 @@ HTTP Request
 - **Test Runner**: Native Bun test runner (`bun test`).
 - **Test Locations**: Place unit and integration tests alongside modules as `*.test.ts` or inside `tests/`.
 - **Route Smoke Testing**: Test Elysia endpoints directly via `app.handle(new Request(...))` without spinning up a live network port.
+
+## Git Commit Rules
+- When creating git commits, NEVER add `Co-Authored-By` trailers or mention OpenCode/AI in the commit message.
+- Do NOT override `user.name` or `user.email` in git config or via `-c` flags.
+- Group changes logically by feature and create separate commits for each feature.
+- Use clean, standard commit messages describing only the implemented features.
