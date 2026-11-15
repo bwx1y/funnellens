@@ -78,6 +78,13 @@
       "when": 1794633671071,
       "tag": "0010_steep_night_thrasher",
       "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "7",
+      "when": 1794693275785,
+      "tag": "0011_panoramic_typhoid_mary",
+      "breakpoints": true
     }
   ]
 }

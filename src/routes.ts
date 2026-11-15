@@ -5,6 +5,7 @@ import {UserController} from "@/modules/user";
 import {WaSessionController} from "@/modules/wa/session";
 import {WaWebhookController} from "@/modules/wa/webhook";
 import {WaContactController} from "@/modules/wa/contact";
+import {MetaController, MetaOAuthController} from "@/modules/meta";
 
 export const routes = new Elysia({
     prefix: "/api"
@@ -14,4 +15,6 @@ export const routes = new Elysia({
     .use(UserController)
     .use(WaSessionController)
     .use(WaWebhookController)
-    .use(WaContactController);
+    .use(WaContactController)
+    .use(MetaOAuthController)
+    .use(MetaController);

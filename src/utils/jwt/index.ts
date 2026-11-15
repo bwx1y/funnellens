@@ -44,6 +44,30 @@ export class JwtUtil {
             }
         })
 
+    static async signOAuthState(value: { userId: string; tenantId: string }): Promise<string> {
+        return new SignJWT({tenantId: value.tenantId, purpose: "meta_oauth"})
+            .setProtectedHeader({alg: "HS256"})
+            .setSubject(value.userId)
+            .setIssuedAt()
+            .setExpirationTime("10m")
+            .sign(JwtUtil.JWT_SECRET);
+    }
+
+    static async verifyOAuthState(token: string): Promise<{ userId: string; tenantId: string }> {
+        let payload: JWTPayload;
+        try {
+            ({payload} = await jwtVerify(token, JwtUtil.JWT_SECRET));
+        } catch {
+            throw new UnauthorizedError("Invalid or expired OAuth state");
+        }
+
+        if (payload.purpose !== "meta_oauth" || typeof payload.sub !== "string" || typeof payload.tenantId !== "string") {
+            throw new UnauthorizedError("Invalid OAuth state");
+        }
+
+        return {userId: payload.sub, tenantId: payload.tenantId};
+    }
+
     async register(value: { id: string, tenant: string, role: typeof roleEnum.enumValues[number] }) {
         const expiresIn = 7 * 24 * 60 * 60;
         const expTimestamp = Math.floor(Date.now() / 1000) + expiresIn;
