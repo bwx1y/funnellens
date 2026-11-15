@@ -36,8 +36,23 @@ export const Config = {
         // host-gateway alias configured under open_wa.extra_hosts in docker-compose.yml.
         webhookUrl: getEnv("OPEN_WA_WEBHOOK_URL", "http://host.docker.internal:3000/api/wa/webhook"),
     },
-    ollama: {
-        baseUrl: getEnv("OLLAMA_BASE_URL", "http://localhost:11434"),
-        model: getEnv("OLLAMA_MODEL", "qwen2.5:0.5b"),
-    }
+    meta: {
+        appId: getEnv("META_APP_ID", "APP_ID"),
+        appSecret: getEnv("META_APP_SECRET", "APP_SECRET"),
+        apiVersion: getEnv("META_API_VERSION", "v21.0"),
+        redirectUri: getEnv("META_REDIRECT_URI", "http://localhost:3000/api/meta/oauth/callback"),
+        scopes: getEnv("META_OAUTH_SCOPES", "ads_read,ads_management,business_management")
+            .split(",")
+            .map((scope) => scope.trim())
+            .filter(Boolean),
+    },
+    ai: {
+        gemini: {
+            apiKeys: getEnv("GEMINI_API_KEYS", "")
+                .split(",")
+                .map((key) => key.trim())
+                .filter(Boolean),
+            model: getEnv("GEMINI_MODEL", "gemini-2.5-flash"),
+        },
+    },
 };
