@@ -10,6 +10,7 @@
   },
   "dependencies": {
     "@elysia/openapi": "^1.4.17",
+    "@google/genai": "^3.3.0",
     "@rmyndharis/openwa": "^0.11.0",
     "@toon-format/toon": "^4.4.0",
     "@types/pg": "^8.23.1",
