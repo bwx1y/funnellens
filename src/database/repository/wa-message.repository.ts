@@ -12,7 +12,7 @@ type ContentItem = {
 }
 
 export class WaMessageRepository extends DatabaseRepository {
-    async findAllByTenantIdAndGrubByPhone(tenantId: string, sessionId?: string) {
+    async findAllByTenantIdGroupByPhone(tenantId: string, sessionId?: string) {
         return this.database.select({
             phone: {
                 number: WaMessageEntity.phone,
