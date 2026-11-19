@@ -10,7 +10,7 @@ Backend REST API multi-tenant menggunakan [Bun](https://bun.sh), [Elysia](https:
 - Verifikasi email dan reset password via OTP/token
 - Manajemen sesi WhatsApp via OpenWA (buat sesi, ambil QR login, update, hapus)
 - Webhook OpenWA: `session.authenticated` menyinkronkan status sesi, `session.disconnected` menandai sesi terputus dan mengirim email notifikasi ke admin, serta `message.received` untuk klasifikasi pesan via AI
-- Klasifikasi prospek otomatis berbasis AI lokal via Ollama (kategori `HOT`, `WARM`, `COLD`)
+- Klasifikasi prospek otomatis via Google Gemini dengan rotasi API key (kategori `HOT`, `WARM`, `COLD`)
 - Manajemen kontak dan statistik prospek WhatsApp (`/api/contact`)
 - Hashing password (native `Bun.password` bcrypt)
 - Antrean background job via BullMQ & Redis (`email-queue`, `queue-session-wa`, `WaWebhook-Chat`)
@@ -25,6 +25,7 @@ Backend REST API multi-tenant menggunakan [Bun](https://bun.sh), [Elysia](https:
 - Redis (v7+)
 - SMTP server (Mailpit/MailHog untuk lokal; email tidak terkirim tanpa SMTP yang hidup)
 - Gateway OpenWA (opsional; wajib untuk fitur sesi WhatsApp)
+- API key Google Gemini (`GEMINI_API_KEYS`) untuk klasifikasi prospek; tanpa key ini worker klasifikasi gagal
 - Docker & Docker Compose (opsional)
 
 ## Setup Lokal
@@ -57,9 +58,13 @@ cp .env.example .env
 | `OPEN_WA_APP_KEY` | - | API key OpenWA |
 | `OPEN_WA_WEBHOOK_URL` | `http://host.docker.internal:3000/api/wa/webhook` | URL webhook yang didaftarkan ke OpenWA; harus terjangkau dari container gateway, bukan dari host |
 | `OPEN_WA_PORT` | `2785` | Hanya dipakai `docker-compose.yml` untuk publish port gateway |
-| `OLLAMA_BASE_URL` | `http://localhost:11434` | URL endpoint Ollama API (di compose: `http://ollama:11434`) |
-| `OLLAMA_MODEL` | `qwen2.5:0.5b` | Nama model AI Ollama yang digunakan |
-| `OLLAMA_PORT` | `11434` | Port publish container Ollama pada `docker-compose.yml` |
+| `GEMINI_API_KEYS` | kosong | Daftar API key Gemini dipisah koma; rotasi otomatis saat kuota key habis |
+| `GEMINI_MODEL` | `gemini-2.5-flash` | Model Gemini untuk klasifikasi prospek |
+| `META_APP_ID` | `APP_ID` | App ID Meta untuk OAuth Ads |
+| `META_APP_SECRET` | `APP_SECRET` | App secret Meta untuk OAuth Ads |
+| `META_API_VERSION` | `v21.0` | Versi Graph API Meta |
+| `META_REDIRECT_URI` | `http://localhost:3000/api/meta/oauth/callback` | Redirect URI terdaftar di app Meta |
+| `META_OAUTH_SCOPES` | `ads_read,ads_management,business_management` | Scope OAuth dipisah koma |
 
 3. Setup database:
 ```bash
@@ -85,7 +90,7 @@ Server berjalan di `http://localhost:3000`. Worker (`src/modules/**/worker.ts`) 
 
 ## Menjalankan dengan Docker
 
-Jalankan seluruh stack (API, PostgreSQL, Redis, OpenWA, Ollama) dengan Docker Compose:
+Jalankan seluruh stack (API, PostgreSQL, Redis, OpenWA) dengan Docker Compose:
 
 ```bash
 # Jalankan container di background
@@ -153,6 +158,14 @@ Semua respons memakai bentuk `{ status: boolean, message?: string, ...data }`. E
 | `GET` | `/api/contact` | Bearer | List kontak pelanggan per tenant (opsional filter `sessionId`) |
 | `GET` | `/api/contact/stats` | Bearer | Statistik persentase prospek (`COLD`, `WARM`, `HOT`) per tenant |
 
+#### Meta Ads (`/api/meta`)
+| Method | Endpoint | Auth | Deskripsi |
+|---|---|---|---|
+| `GET` | `/api/meta/oauth/url` | Bearer | URL otorisasi OAuth Meta untuk user yang sedang login |
+| `GET` | `/api/meta/oauth/callback` | Publik | Callback redirect Meta; menukar `code` menjadi access token & menyimpan koneksi |
+| `GET` | `/api/meta/connection` | Bearer | Detail koneksi Meta milik user yang sedang login |
+| `DELETE` | `/api/meta/connection` | Bearer | Putuskan koneksi Meta user |
+
 #### Webhook OpenWA (`/api/wa/webhook`)
 | Method | Endpoint | Auth | Deskripsi |
 |---|---|---|---|
@@ -173,7 +186,7 @@ Body mengikuti `WebhookDelivery` dari SDK OpenWA:
 Perilaku per event:
 - `session.authenticated` — set `status = ready`, isi `phone_number` dan `phone_name` sesi.
 - `session.disconnected` — set `status = disconnected`, lalu enqueue job `send-session-disconnected` ke `email-queue` untuk semua user `ADMIN` tenant pemilik sesi. `jobId` diisi dari `idempotencyKey`, jadi retry delivery yang sama tidak mengirim email ganda. Sesi tak dikenal, tenant kosong, atau tenant tanpa admin hanya menghasilkan log `warn` (endpoint tetap `{"status":true}`).
-- `message.received` — hanya memproses pesan masuk dari pelanggan (`!fromMe`), enqueue job ke antrean `WaWebhook-Chat` untuk diklasifikasi oleh AI worker via Ollama (`HOT`/`WARM`/`COLD`), kemudian disimpan ke riwayat pesan `wa_message`.
+- `message.received` — hanya memproses pesan masuk dari pelanggan (`!fromMe`), enqueue job ke antrean `WaWebhook-Chat` untuk diklasifikasi oleh AI worker via Gemini (`HOT`/`WARM`/`COLD`), kemudian disimpan ke riwayat pesan `wa_message`. Pesan di-buffer 10 detik per kombinasi sesi + pengirim sebelum diklasifikasi, sehingga satu batch percakapan hanya menghasilkan satu panggilan AI.
 Email notifikasi memakai template `src/utils/mail/template/session-disconnected.html` dengan subject `Sesi WhatsApp "<nama sesi>" terputus`.
 
 ---
@@ -206,11 +219,14 @@ src/
 │   ├── auth/       # Route, schema, service, & worker email
 │   ├── profile/    # Route, schema, & service profil user
 │   ├── user/       # Route, schema, & service manajemen user tenant
+│   ├── meta/       # Route, schema, & service koneksi Meta Ads (OAuth)
+│   ├── campaign/   # Modul campaign (dalam pengembangan)
 │   └── wa/
 │       ├── session/ # Route, schema, service, & worker registrasi webhook OpenWA
 │       ├── contact/ # Route, schema, & service kontak & audience stats
 │       └── webhook/ # Route, schema, service, & worker klasifikasi pesan AI OpenWA
 ├── plugins/        # Plugin Elysia (httpLogger)
+├── providers/      # Adapter AI: base.ai.ts & adapter/gemini.adapter.ts
 ├── utils/
 │   ├── error/      # AppError & subclass (BadRequest, Unauthorized, Forbidden, NotFound, Conflict)
 │   ├── jwt/        # JwtUtil (verifikasi token & guard isAuthenticated)
@@ -218,7 +234,6 @@ src/
 │   ├── mail/       # MailUtil & template HTML
 │   ├── password/   # PasswordUtil (Bun.password)
 │   ├── queue/      # QueueManager & WorkerManager (BullMQ) + registry shutdown
-│   ├── ollama/     # Client Ollama, structured output, prompt rules & few-shot
 │   └── redis/      # Koneksi ioredis bersama
 ├── routes.ts       # Agregasi route utama (/api)
 └── index.ts        # Entrypoint server, error handler, auto-load worker, listener
