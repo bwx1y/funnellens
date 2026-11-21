@@ -13,3 +13,4 @@ Daftar fitur backend yang telah selesai diimplementasikan dan diuji:
 | 07 | **View Insight Metrics** | [`07-insight-metrics-view.md`](./07-insight-metrics-view.md) | 2026-11-21 | Selesai & Teruji ✅ |
 | 08 | **Overview & Summary Analytics** | [`08-overview-summary.md`](./08-overview-summary.md) | 2026-11-22 | Selesai & Teruji ✅ |
 | 09 | **Funnel Intelligence & Leakage Detection** | [`09-funnel-intelligence.md`](./09-funnel-intelligence.md) | 2026-11-21 | Selesai & Teruji ✅ |
+| 10 | **Audience Intelligence & Leads Management** | [`10-audience-intelligence.md`](./10-audience-intelligence.md) | 2026-11-21 | Selesai & Teruji ✅ |

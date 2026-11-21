@@ -44,6 +44,16 @@ export function todayInZone(timezoneName: string): string {
     }
 }
 
+/** Returns `timezoneName` when `Intl` accepts it, otherwise `"UTC"`. */
+export function safeTimeZone(timezoneName: string): string {
+    try {
+        new Intl.DateTimeFormat("en-CA", {timeZone: timezoneName});
+        return timezoneName;
+    } catch {
+        return "UTC";
+    }
+}
+
 /** Maps a date inside `since..since + days - 1` onto one of 7 sparkline buckets. */
 export function bucketIndex(date: string, since: string, days: number): number {
     return Math.min(6, Math.max(0, Math.floor(dayDiff(since, date) * 7 / days)));

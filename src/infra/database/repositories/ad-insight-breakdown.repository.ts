@@ -197,4 +197,85 @@ export class AdInsightBreakdownRepository extends DatabaseRepository {
             isNull(AdInsightBreakdownDailyEntity.hourOfDay)
         );
     }
+
+    /** Hourly slice only (`hour_of_day` not null): `scopeFilter` excludes those rows by design. */
+    async getHourlyMetrics(
+        accountId: string,
+        since: Date,
+        until: Date
+    ): Promise<{hour: number; spendMinor: number; impressions: number}[]> {
+        const rows = await this.database.execute(sql`
+            select i.hour_of_day                        as hour,
+                   coalesce(sum(i.spend_minor), 0)      as spend_minor,
+                   coalesce(sum(i.impressions), 0)      as impressions
+            from ad_insights_breakdown_daily i
+            where i.account_id = ${accountId}
+              and i.level = 'ad'
+              and i.hour_of_day is not null
+              and i.date >= ${this.toDateString(since)}
+              and i.date <= ${this.toDateString(until)}
+            group by 1
+            order by 1 asc
+        `) as unknown as {hour: number; spend_minor: string; impressions: string}[];
+
+        return rows.map((row) => ({
+            hour: Number(row.hour),
+            spendMinor: Number(row.spend_minor),
+            impressions: Number(row.impressions),
+        }));
+    }
+
+    /** One row per ad: which distinct placements/devices that ad has in the period. */
+    async getAdAttributionMap(
+        accountId: string,
+        since: Date,
+        until: Date
+    ): Promise<{
+        adId: string;
+        placementCount: number;
+        publisherPlatform: string | null;
+        platformPosition: string | null;
+        placementKeys: string[];
+        deviceCount: number;
+        impressionDevice: string | null;
+        deviceKeys: string[];
+    }[]> {
+        const rows = await this.database.execute(sql`
+            select coalesce(i.ad_id, i.entity_id)                                              as ad_id,
+                   count(distinct coalesce(i.publisher_platform, '') || '|' || coalesce(i.platform_position, '')) as placement_count,
+                   min(i.publisher_platform)                                                   as publisher_platform,
+                   min(i.platform_position)                                                    as platform_position,
+                   array_agg(distinct coalesce(i.publisher_platform, '') || '|' || coalesce(i.platform_position, '')) as placement_keys,
+                   count(distinct coalesce(i.impression_device, ''))                           as device_count,
+                   min(i.impression_device)                                                    as impression_device,
+                   array_agg(distinct coalesce(i.impression_device, ''))                       as device_keys
+            from ad_insights_breakdown_daily i
+            where i.account_id = ${accountId}
+              and i.level = 'ad'
+              and i.hour_of_day is null
+              and i.date >= ${this.toDateString(since)}
+              and i.date <= ${this.toDateString(until)}
+            group by 1
+        `) as unknown as {
+            ad_id: string;
+            placement_count: string;
+            publisher_platform: string | null;
+            platform_position: string | null;
+            placement_keys: string[];
+            device_count: string;
+            impression_device: string | null;
+            device_keys: string[];
+        }[];
+
+        return rows.map((row) => ({
+            adId: row.ad_id,
+            placementCount: Number(row.placement_count),
+            publisherPlatform: row.publisher_platform,
+            platformPosition: row.platform_position,
+            placementKeys: row.placement_keys,
+            deviceCount: Number(row.device_count),
+            impressionDevice: row.impression_device,
+            deviceKeys: row.device_keys,
+        }));
+    }
 }

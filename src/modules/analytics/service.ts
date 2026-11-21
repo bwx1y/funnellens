@@ -7,7 +7,9 @@ import {CampaignRepository} from "@db/repositories/campaign.repository";
 import {InsightAlertRepository} from "@db/repositories/insight-alert.repository";
 import {requireAccountScope} from "@db/repositories/ad-account.repository";
 import {BadRequestError} from "@shared/errors";
-import {addDays, bucketIndex, dateRange, dayCount, endOfDayUtc, startOfDayUtc, todayInZone} from "@shared/dates";
+import {bucketIndex, dateRange} from "@shared/dates";
+import {round4} from "@shared/numbers";
+import {resolvePeriod} from "@shared/period";
 import {funnelHealth, type FunnelHealthResult, type HealthBadge} from "@shared/health";
 import {
     FUNNEL_STAGES,
@@ -28,7 +30,6 @@ import {
 } from "@shared/funnel";
 
 const SPARKLINE_BUCKETS = 7;
-const DEFAULT_PERIOD_DAYS = 30;
 const HOT_LEAD_LIMIT = 5;
 
 /** Fill-in for the half of the counts a daily row does not carry; the stage reader picks its own field. */
@@ -201,7 +202,7 @@ export class AnalyticsService {
         const account = await requireAccountScope(tenantId, query.accountId);
 
         const {since, until, days, previousSince, previousUntil, start, end, prevStart, prevEnd} =
-            this.resolvePeriod(account, query);
+            resolvePeriod(account, query);
         const {accountId, campaignId} = query;
 
         const [
@@ -396,7 +397,7 @@ export class AnalyticsService {
     async getFunnel(tenantId: string, query: FunnelQuery): Promise<FunnelResponse> {
         const account = await requireAccountScope(tenantId, query.accountId);
         const objectiveGroup = query.objectiveGroup ?? "wa";
-        const period = this.resolvePeriod(account, query);
+        const period = resolvePeriod(account, query);
 
         const trackingState = trackingStateOf(await this.analyticsRepo.getTrackingSummary(query.accountId));
         const funnel = await this.loadFunnel({
@@ -441,7 +442,7 @@ export class AnalyticsService {
 
     async getLeakage(tenantId: string, query: LeakageQuery): Promise<LeakageResponse> {
         const account = await requireAccountScope(tenantId, query.accountId);
-        const period = this.resolvePeriod(account, query);
+        const period = resolvePeriod(account, query);
 
         const trackingState = trackingStateOf(await this.analyticsRepo.getTrackingSummary(query.accountId));
         // WhatsApp only: the caption speaks about lost chats, and `web` would need its own wording.
@@ -499,7 +500,7 @@ export class AnalyticsService {
         const definition = FUNNEL_STAGES[objectiveGroup].find((stage) => stage.key === query.stageKey);
         if (definition === undefined) throw new BadRequestError("Tahap funnel tidak dikenal");
 
-        const period = this.resolvePeriod(account, query);
+        const period = resolvePeriod(account, query);
         const trackingState = trackingStateOf(await this.analyticsRepo.getTrackingSummary(query.accountId));
         const funnel = await this.loadFunnel({
             accountId: query.accountId,
@@ -659,39 +660,6 @@ export class AnalyticsService {
         return undefined;
     }
 
-    private resolvePeriod(account: {timezoneName: string}, query: {since?: string; until?: string}): {
-        since: string;
-        until: string;
-        days: number;
-        previousSince: string;
-        previousUntil: string;
-        start: Date;
-        end: Date;
-        prevStart: Date;
-        prevEnd: Date;
-    } {
-        const until = query.until ?? todayInZone(account.timezoneName);
-        const since = query.since ?? addDays(until, -(DEFAULT_PERIOD_DAYS - 1));
-        if (since > until) {
-            throw new BadRequestError("Rentang tanggal tidak valid");
-        }
-
-        const days = dayCount(since, until);
-        const previousUntil = addDays(since, -1);
-        const previousSince = addDays(previousUntil, -(days - 1));
-
-        return {
-            since,
-            until,
-            days,
-            previousSince,
-            previousUntil,
-            start: startOfDayUtc(since),
-            end: endOfDayUtc(until),
-            prevStart: startOfDayUtc(previousSince),
-            prevEnd: endOfDayUtc(previousUntil),
-        };
-    }
 }
 
 function toSeriesPoint(point: {date: string; spendMinor: number; leads: number}): {
@@ -707,6 +675,3 @@ function percentChange(current: number, previous: number): number | null {
     return previous === 0 ? null : Math.round(((current - previous) / previous) * 10000) / 100;
 }
 
-function round4(value: number): number {
-    return Math.round(value * 10000) / 10000;
-}

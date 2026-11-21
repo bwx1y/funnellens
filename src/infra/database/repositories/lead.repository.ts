@@ -1,5 +1,7 @@
 import {DatabaseRepository} from "./base.repository";
 import {LeadEntity} from "@db/schema/wa/lead.entity";
+import {LeadAssessmentEntity} from "@db/schema/wa/lead-assessment.entity";
+import {AdAccountEntity} from "@db/schema/ads/ad-account.entity";
 import {and, asc, desc, eq, gte, ilike, isNull, lte, or, sql} from "drizzle-orm";
 
 export type Lead = typeof LeadEntity.$inferSelect;
@@ -7,7 +9,7 @@ export type InsertLead = typeof LeadEntity.$inferInsert;
 
 export interface LeadFilterParams {
     temperature?: "COLD" | "WARM" | "HOT";
-    stage?: "CHAT_STARTED" | "REPLIED" | "QUALIFIED" | "CLOSED";
+    stage?: "CHAT_STARTED" | "REPLIED" | "QUALIFIED" | "CLOSING" | "CLOSED";
     /** Matches `name` OR `phone_masked`, case-insensitive. */
     search?: string;
     page?: number;
@@ -25,6 +27,32 @@ export interface TemperatureCounts {
 export interface SpeedMetrics {
     avgFirstReplySeconds: number | null;
     stuckLeads: number;
+    /** Longest answered wait in the period, in whole minutes; `null` when nothing was answered. */
+    longestWaitMinutes: number | null;
+}
+
+export interface LeadTemperatureDistribution {
+    hot: number;
+    warm: number;
+    cold: number;
+    unassessed: number;
+}
+
+export interface LeadAdCounts {
+    adId: string;
+    leads: number;
+    hotLeads: number;
+}
+
+export interface LeadHourCounts {
+    hour: number;
+    leads: number;
+}
+
+export interface ManualLeadChanges {
+    stage?: Lead["stage"];
+    temperature?: "COLD" | "WARM" | "HOT";
+    dealValueMinor?: number | null;
 }
 
 const DEFAULT_PAGE_SIZE = 20;
@@ -156,12 +184,14 @@ export class LeadRepository extends DatabaseRepository {
     }
 
     /**
-     * `avgFirstReplySeconds` is period-scoped; `stuckLeads` is the live account-wide backlog
-     * (unanswered for more than 24h) and intentionally ignores `since`/`until`.
+     * `avgFirstReplySeconds` and `longestWaitMinutes` are period-scoped (answered leads only);
+     * `stuckLeads` is the live account-wide backlog (unanswered for more than 24h) and intentionally
+     * ignores `since`/`until`.
      */
     async getSpeedMetrics(accountId: string, since: Date, until: Date): Promise<SpeedMetrics> {
         const [average] = await this.database.select({
             avgSeconds: sql<string | null>`avg(extract(epoch from (${LeadEntity.firstRepliedAt} - ${LeadEntity.firstSeenAt})))`,
+            longestSeconds: sql<string | null>`max(extract(epoch from (${LeadEntity.firstRepliedAt} - ${LeadEntity.firstSeenAt})))`,
         })
             .from(LeadEntity)
             .where(
@@ -181,6 +211,9 @@ export class LeadRepository extends DatabaseRepository {
 
         return {
             avgFirstReplySeconds: average.avgSeconds === null ? null : Number(average.avgSeconds),
+            longestWaitMinutes: average.longestSeconds === null
+                ? null
+                : Math.round(Number(average.longestSeconds) / 60),
             stuckLeads: Number(stuck.stuckLeads),
         };
     }
@@ -227,5 +260,133 @@ export class LeadRepository extends DatabaseRepository {
         ]);
 
         return {leads, total: Number(counted.total)};
+    }
+
+    /** Joined to the account's tenant, so a foreign lead is indistinguishable from a missing one. */
+    async getByIdForTenant(tenantId: string, id: number): Promise<Lead | null> {
+        const [row] = await this.database.select({lead: LeadEntity})
+            .from(LeadEntity)
+            .innerJoin(AdAccountEntity, eq(AdAccountEntity.id, LeadEntity.accountId))
+            .where(and(eq(LeadEntity.id, id), eq(AdAccountEntity.tenantId, tenantId)))
+            .limit(1);
+
+        return row?.lead ?? null;
+    }
+
+    /** Current temperature split of the period's leads; `unassessed` counts rows without a level. */
+    async getTemperatureDistribution(
+        accountId: string,
+        since: Date,
+        until: Date,
+        campaignId?: string
+    ): Promise<LeadTemperatureDistribution> {
+        const rows = await this.database.execute(sql`
+            select count(*) filter (where l.temperature = 'HOT')  as hot,
+                   count(*) filter (where l.temperature = 'WARM') as warm,
+                   count(*) filter (where l.temperature = 'COLD') as cold,
+                   count(*) filter (where l.temperature is null)  as unassessed
+            from leads l
+            where l.account_id = ${accountId}
+              and l.first_seen_at >= ${since.toISOString()}::timestamptz
+              and l.first_seen_at <= ${until.toISOString()}::timestamptz
+              ${campaignId === undefined ? sql`` : sql`and l.campaign_id = ${campaignId}`}
+        `) as unknown as {hot: string; warm: string; cold: string; unassessed: string}[];
+
+        const [row] = rows;
+        return {
+            hot: Number(row.hot),
+            warm: Number(row.warm),
+            cold: Number(row.cold),
+            unassessed: Number(row.unassessed),
+        };
+    }
+
+    /**
+     * Leads per `ad_id` in the period; rows without `ad_id` are not returned. `hotLeads` uses the HOT
+     * milestone so it matches `AnalyticsRepository.getCampaignLeadMetrics`.
+     */
+    async getLeadCountsByAd(accountId: string, since: Date, until: Date): Promise<LeadAdCounts[]> {
+        const rows = await this.database.execute(sql`
+            select l.ad_id as ad_id,
+                   count(*) as leads,
+                   count(*) filter (where m.lead_id is not null) as hot_leads
+            from leads l
+            left join lead_milestones m
+                   on m.lead_id = l.id
+                  and m.level = 'HOT'
+            where l.account_id = ${accountId}
+              and l.first_seen_at >= ${since.toISOString()}::timestamptz
+              and l.first_seen_at <= ${until.toISOString()}::timestamptz
+              and l.ad_id is not null
+            group by l.ad_id
+        `) as unknown as {ad_id: string; leads: string; hot_leads: string}[];
+
+        return rows.map((row) => ({
+            adId: row.ad_id,
+            leads: Number(row.leads),
+            hotLeads: Number(row.hot_leads),
+        }));
+    }
+
+    /** Leads per local hour of `first_seen_at`; `timeZone` must already be `safeTimeZone`-validated. */
+    async getLeadCountsByHour(
+        accountId: string,
+        since: Date,
+        until: Date,
+        timeZone: string
+    ): Promise<LeadHourCounts[]> {
+        const rows = await this.database.execute(sql`
+            select extract(hour from (l.first_seen_at at time zone ${timeZone}))::int as hour,
+                   count(*) as leads
+            from leads l
+            where l.account_id = ${accountId}
+              and l.first_seen_at >= ${since.toISOString()}::timestamptz
+              and l.first_seen_at <= ${until.toISOString()}::timestamptz
+            group by 1
+            order by 1 asc
+        `) as unknown as {hour: number; leads: string}[];
+
+        return rows.map((row) => ({hour: Number(row.hour), leads: Number(row.leads)}));
+    }
+
+    /**
+     * One transaction: update the lead, then append a manual assessment row only when `temperature`
+     * actually changes. `manualAssessmentId` is `null` when no row was written.
+     */
+    async updateManual(
+        leadId: number,
+        changes: ManualLeadChanges
+    ): Promise<{lead: Lead; manualAssessmentId: string | null}> {
+        return this.database.transaction(async (tx) => {
+            const [current] = await tx.select({temperature: LeadEntity.temperature})
+                .from(LeadEntity)
+                .where(eq(LeadEntity.id, leadId))
+                .limit(1);
+
+            const [updated] = await tx.update(LeadEntity)
+                .set({...changes, updatedAt: new Date()})
+                .where(eq(LeadEntity.id, leadId))
+                .returning();
+
+            let manualAssessmentId: string | null = null;
+            if (changes.temperature !== undefined && changes.temperature !== (current?.temperature ?? null)) {
+                const [assessment] = await tx.insert(LeadAssessmentEntity)
+                    .values({
+                        leadId,
+                        level: changes.temperature,
+                        confidence: "tinggi",
+                        reason: "Diubah manual oleh pengguna",
+                        eventAt: new Date(),
+                        applied: true,
+                        ruleVersion: "manual-r1",
+                        evidence: null,
+                    })
+                    .returning({id: LeadAssessmentEntity.id});
+
+                manualAssessmentId = assessment.id;
+            }
+
+            return {lead: updated, manualAssessmentId};
+        });
     }
 }

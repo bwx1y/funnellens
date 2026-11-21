@@ -1,3 +1,5 @@
+import {round2, round4} from "@shared/numbers";
+
 export type FunnelObjectiveGroup = "wa" | "web";
 
 export type FunnelStageKey =
@@ -214,12 +216,4 @@ export function stageChannel(stageKey: string): FunnelObjectiveGroup | null {
 export function trackingStateOf(summary: {lastSuccessAt: Date | null; overdue: boolean}): TrackingState {
     if (summary.lastSuccessAt === null) return "unknown";
     return summary.overdue ? "stale" : "up_to_date";
-}
-
-function round2(value: number): number {
-    return Math.round(value * 100) / 100;
-}
-
-function round4(value: number): number {
-    return Math.round(value * 10000) / 10000;
 }

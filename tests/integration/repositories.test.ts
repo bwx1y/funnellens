@@ -325,7 +325,7 @@ describe("Database repositories", () => {
             new Date(now - 40 * 60 * 60 * 1000),
             new Date(now)
         );
-        expect(speed).toEqual({avgFirstReplySeconds: 1800, stuckLeads: 1});
+        expect(speed).toEqual({avgFirstReplySeconds: 1800, stuckLeads: 1, longestWaitMinutes: 30});
 
         const page = await leadRepo.getLeadList(accountId, {temperature: "HOT", page: 1, limit: 1});
         expect(page.total).toBe(2);
