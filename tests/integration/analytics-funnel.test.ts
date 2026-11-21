@@ -258,6 +258,15 @@ describe("Analytics funnel", () => {
             impactMinor: null,
             impactCaption: "≈45 chat hilang",
             note: null,
+            explanation: {
+                id: expect.any(String),
+                context: "funnel_leak",
+                state: "PENDING",
+                source: null,
+                text: null,
+                evidenceIds: [],
+                snapshotId: `${SINCE}..${UNTIL}`,
+            },
         });
     });
 

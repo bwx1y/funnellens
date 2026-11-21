@@ -535,7 +535,8 @@ describe("Creative intelligence", () => {
             `http://localhost/api/analytics/creatives/fatigue?${query}`,
             {headers}
         ));
-        expect(Object.keys(await fatigue.json() as object).sort()).toEqual(["creatives", "period", "sample"]);
+        expect(Object.keys(await fatigue.json() as object).sort())
+            .toEqual(["creatives", "explanation", "period", "sample"]);
 
         const comparison = await app.handle(new Request(
             "http://localhost/api/analytics/creatives/comparisons",

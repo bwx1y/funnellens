@@ -1,6 +1,8 @@
 import {requireAccountScope} from "@db/repositories/ad-account.repository";
 import {InsightAlertRepository, type InsightAlert} from "@db/repositories/insight-alert.repository";
 import {NotFoundError} from "@shared/errors";
+import {ExplanationService, type ExplanationRef} from "@/modules/explanations/service";
+import {formatNumber} from "@/modules/explanations/rules";
 import {
     snoozedUntil,
     type AlertStatusFilter,
@@ -36,6 +38,7 @@ export interface AlertRow {
 export interface AlertListResponse {
     status: AlertStatusFilter;
     alerts: AlertRow[];
+    explanation: ExplanationRef | null;
 }
 
 function toRow(alert: InsightAlert): AlertRow {
@@ -63,7 +66,10 @@ function toRow(alert: InsightAlert): AlertRow {
 
 /** Account-scoped alert management; every method re-checks the tenant before touching a row. */
 export class AlertService {
-    constructor(private readonly alertRepo = new InsightAlertRepository()) {}
+    constructor(
+        private readonly alertRepo = new InsightAlertRepository(),
+        private readonly explanations = new ExplanationService()
+    ) {}
 
     async list(tenantId: string, query: AlertListQuery): Promise<AlertListResponse> {
         await requireAccountScope(tenantId, query.accountId);
@@ -71,7 +77,35 @@ export class AlertService {
         const filter = query.status ?? "active";
         const rows = await this.alertRepo.findByAccountIdAndStatus(query.accountId, filter);
 
-        return {status: filter, alerts: rows.map(toRow)};
+        const ruleCounts = new Map<string, number>();
+        for (const row of rows) ruleCounts.set(row.ruleKey, (ruleCounts.get(row.ruleKey) ?? 0) + 1);
+        let rule = "belum ada";
+        let ruleCount = 0;
+        for (const [ruleKey, count] of ruleCounts) {
+            if (count > ruleCount) {
+                rule = ruleKey;
+                ruleCount = count;
+            }
+        }
+
+        const explanation = await this.explanations.ensure({
+            tenantId,
+            accountId: query.accountId,
+            context: "alert",
+            entityType: "account",
+            entityId: query.accountId,
+            filter: {status: filter},
+            snapshotId: filter,
+            facts: {
+                active: formatNumber(rows.length),
+                critical: formatNumber(rows.filter((row) => row.level === "CRITICAL").length),
+                warning: formatNumber(rows.filter((row) => row.level === "WARNING").length),
+                rule,
+            },
+            evidenceIds: rows.map((row) => String(row.id)),
+        });
+
+        return {status: filter, alerts: rows.map(toRow), explanation};
     }
 
     async badge(tenantId: string, query: {accountId: string}): Promise<{count: number}> {

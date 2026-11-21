@@ -2,6 +2,8 @@ import {requireAccountScope} from "@db/repositories/ad-account.repository";
 import {PixelSourceRepository, type PixelSource} from "@db/repositories/pixel-source.repository";
 import {TrackingHealthRepository, type TrackingHealthEvent} from "@db/repositories/tracking-health.repository";
 import {round4} from "@shared/numbers";
+import {ExplanationService, type ExplanationRef} from "@/modules/explanations/service";
+import {formatNumber, formatPercent} from "@/modules/explanations/rules";
 import {
     DEDUP_TARGET,
     EMQ_KEY_EVENTS,
@@ -64,6 +66,7 @@ export interface TrackingHealthResponse {
     }[];
     sample: SampleBlock;
     note?: string;
+    explanation: ExplanationRef | null;
 }
 
 /** Newest pixel first; a tie falls back to the ascending pixel id so the pick is deterministic. */
@@ -108,7 +111,8 @@ function readMatchKeys(pixel: PixelSource | null): string[] | null {
 export class TrackingHealthService {
     constructor(
         private readonly pixelSourceRepo = new PixelSourceRepository(),
-        private readonly trackingHealthRepo = new TrackingHealthRepository()
+        private readonly trackingHealthRepo = new TrackingHealthRepository(),
+        private readonly explanations = new ExplanationService()
     ) {}
 
     async getTrackingHealth(tenantId: string, query: TrackingHealthQuery): Promise<TrackingHealthResponse> {
@@ -172,6 +176,23 @@ export class TrackingHealthService {
 
         const n = summary.date === null ? 0 : summary.browserCount + summary.serverCount;
 
+        const explanation = await this.explanations.ensure({
+            tenantId,
+            accountId: account.id,
+            context: "tracking_health",
+            entityType: "account",
+            entityId: account.id,
+            filter: {},
+            snapshotId: summary.date ?? "tanpa-tanggal",
+            facts: {
+                emq: formatNumber(average),
+                dedup: formatPercent(capiDedup),
+                pixel: pixelRow === null ? "tidak terhubung" : "terhubung",
+                capi: pixelRow?.capiConfigured === true ? "terhubung" : "tidak terhubung",
+            },
+            evidenceIds: [],
+        });
+
         return {
             date: summary.date,
             pixel: {
@@ -206,6 +227,7 @@ export class TrackingHealthService {
                 gate: EVENT_GATE,
             },
             ...(events.length === 0 ? {note: "Statistik event tidak tersedia untuk akun ini."} : {}),
+            explanation,
         };
     }
 }

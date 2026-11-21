@@ -19,3 +19,4 @@ Daftar fitur backend yang telah selesai diimplementasikan dan diuji:
 | 13 | **Alerts & Health Scoring Engine** | [`13-alerts-health-scoring.md`](./13-alerts-health-scoring.md) | 2026-11-21 | Selesai & Teruji ✅ |
 | 14 | **WhatsApp Cloud API Ingestion** | [`14-wa-cloud-ingestion.md`](./14-wa-cloud-ingestion.md) | 2026-11-21 | Selesai & Teruji ✅ |
 | 15 | **Lead Assessment & Response Types** | [`15-lead-assessment.md`](./15-lead-assessment.md) | 2026-11-21 | Selesai & Teruji ✅ |
+| 16 | **AI Explanations per Blok** | [`16-ai-explanations.md`](./16-ai-explanations.md) | 2026-11-21 | Selesai & Teruji ✅ |

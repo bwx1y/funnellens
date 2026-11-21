@@ -9,6 +9,8 @@ import {NotFoundError} from "@shared/errors";
 import {safeTimeZone} from "@shared/dates";
 import {round2, round4} from "@shared/numbers";
 import {resolvePeriod} from "@shared/period";
+import {ExplanationService, type ExplanationRef} from "@/modules/explanations/service";
+import {formatDuration, formatNumber, formatPercent} from "@/modules/explanations/rules";
 import {
     REPLY_TYPES,
     RESPONSE_BUCKETS,
@@ -89,6 +91,7 @@ export interface SpeedResponse {
     heatmapNote: string | null;
     sample: SampleBlock;
     note?: string;
+    explanation: ExplanationRef | null;
 }
 
 export interface SegmentsResponse {
@@ -125,6 +128,7 @@ export interface PipelineRow {
     firstSeenAt: string | null;
     firstRepliedAt: string | null;
     milestoneAt: {warm: string | null; hot: string | null};
+    explanation: ExplanationRef | null;
 }
 
 export interface PipelineResponse {
@@ -142,6 +146,8 @@ export interface ConversationsResponse {
     sentiment: {positif: number; netral: number; negatif: number};
     sample: SampleBlock;
     note?: string;
+    explanation: ExplanationRef | null;
+    timingExplanation: ExplanationRef | null;
 }
 
 export interface LeadListQuery {
@@ -199,7 +205,8 @@ export class AudienceService {
         private readonly breakdownRepo = new AdInsightBreakdownRepository(),
         private readonly conversationRepo = new ConversationMessageRepository(),
         private readonly analyticsRepo = new AnalyticsRepository(),
-        private readonly campaignRepo = new CampaignRepository()
+        private readonly campaignRepo = new CampaignRepository(),
+        private readonly explanations = new ExplanationService()
     ) {}
 
     async getAudience(tenantId: string, query: AudienceQuery): Promise<AudienceResponse> {
@@ -327,6 +334,25 @@ export class AudienceService {
             }
             : null;
 
+        const explanation = await this.explanations.ensure({
+            tenantId,
+            accountId: query.accountId,
+            context: "velocity",
+            entityType: "account",
+            entityId: query.accountId,
+            filter: {since: period.since, until: period.until},
+            snapshotId: `${period.since}..${period.until}`,
+            facts: {
+                avg: formatDuration(metrics.avgFirstReplySeconds),
+                longest: formatDuration(
+                    metrics.longestWaitMinutes === null ? null : metrics.longestWaitMinutes * 60
+                ),
+                stuck: formatNumber(metrics.stuckLeads),
+                slowest: buckets[buckets.length - 1].label,
+            },
+            evidenceIds: [],
+        });
+
         return {
             period: {since: period.since, until: period.until, days: period.days},
             avgFirstReplySeconds: metrics.avgFirstReplySeconds,
@@ -346,6 +372,7 @@ export class AudienceService {
             ...(metrics.avgFirstReplySeconds === null
                 ? {note: "Belum ada lead yang dibalas pada periode ini."}
                 : {}),
+            explanation,
         };
     }
 
@@ -473,7 +500,25 @@ export class AudienceService {
             period.end
         );
 
-        const rows: PipelineRow[] = effective.map((row) => ({
+        const explanationRefs = await this.explanations.ensureMany(effective.map((row) => ({
+            tenantId,
+            accountId: query.accountId,
+            context: "lead_detail" as const,
+            entityType: "lead",
+            entityId: String(row.leadId),
+            filter: {since: period.since, until: period.until, block: "pipeline"},
+            snapshotId: `${period.since}..${period.until}`,
+            facts: {
+                level: row.level,
+                confidence: row.confidence,
+                stage: row.stage,
+                replied: row.firstRepliedAt === null ? "belum dibalas" : "sudah dibalas",
+                milestone: row.hotAt?.toISOString() ?? row.warmAt?.toISOString() ?? "belum ada",
+            },
+            evidenceIds: row.evidenceWamid === null ? [] : [row.evidenceWamid],
+        })));
+
+        const rows: PipelineRow[] = effective.map((row, index) => ({
             leadId: row.leadId,
             name: row.name,
             phoneMasked: row.phoneMasked,
@@ -490,6 +535,7 @@ export class AudienceService {
                 warm: row.warmAt?.toISOString() ?? null,
                 hot: row.hotAt?.toISOString() ?? null,
             },
+            explanation: explanationRefs[index],
         }));
 
         return {
@@ -531,15 +577,58 @@ export class AudienceService {
             }
         }
 
+        const timedBlock = {
+            medianSeconds: timed.medianSeconds === null ? null : Math.round(timed.medianSeconds),
+            measuredLeads: timed.measuredLeads,
+            observedLeads: timed.observedLeads,
+        };
+
+        // The dominant type follows REPLY_TYPES order on a tie: `counts` is built in that order.
+        let dominant = {responseType: "belum ada", count: 0};
+        for (const row of counts) {
+            if (row.count > dominant.count) dominant = row;
+        }
+
+        const snapshotId = `${period.since}..${period.until}`;
+        const [explanation, timingExplanation] = await Promise.all([
+            this.explanations.ensure({
+                tenantId,
+                accountId: query.accountId,
+                context: "conversation_types",
+                entityType: "account",
+                entityId: query.accountId,
+                filter: {since: period.since, until: period.until},
+                snapshotId,
+                facts: {
+                    classified: formatNumber(classifiedLeads),
+                    dominant: dominant.responseType,
+                    dominantCount: formatNumber(dominant.count),
+                    reject: formatNumber(counts.find((row) => row.responseType === "Menolak")?.count ?? 0),
+                },
+                evidenceIds: [],
+            }),
+            this.explanations.ensure({
+                tenantId,
+                accountId: query.accountId,
+                context: "conversation_timing",
+                entityType: "account",
+                entityId: query.accountId,
+                filter: {since: period.since, until: period.until, block: "timing"},
+                snapshotId,
+                facts: {
+                    median: formatDuration(timedBlock.medianSeconds),
+                    measured: formatNumber(timedBlock.measuredLeads),
+                    observed: formatNumber(timedBlock.observedLeads),
+                },
+                evidenceIds: [],
+            }),
+        ]);
+
         return {
             period: {since: period.since, until: period.until, days: period.days},
             counts,
             classifiedLeads,
-            timed: {
-                medianSeconds: timed.medianSeconds === null ? null : Math.round(timed.medianSeconds),
-                measuredLeads: timed.measuredLeads,
-                observedLeads: timed.observedLeads,
-            },
+            timed: timedBlock,
             sentiment,
             sample: {
                 n: classifiedLeads,
@@ -552,6 +641,8 @@ export class AudienceService {
                 : classifiedLeads < SAMPLE_DENOMINATOR
                     ? {note: "Sampel terklasifikasi belum mencapai 30 chat."}
                     : {}),
+            explanation,
+            timingExplanation,
         };
     }
 

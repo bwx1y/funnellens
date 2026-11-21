@@ -20,6 +20,30 @@ export type ExplanationKey = Pick<
     | "model"
 >;
 
+/** The ten columns of `uq_explanations_key`, in index order. */
+const NATURAL_KEY_COLUMNS = [
+    ExplanationEntity.accountId,
+    ExplanationEntity.context,
+    ExplanationEntity.entityType,
+    ExplanationEntity.entityId,
+    ExplanationEntity.filterHash,
+    ExplanationEntity.snapshotId,
+    ExplanationEntity.evidenceHash,
+    ExplanationEntity.ruleVersion,
+    ExplanationEntity.promptVersion,
+    ExplanationEntity.model,
+];
+
+/** Everything the natural key shares between the rows of one `ensureMany` call. */
+export interface ExplanationScope {
+    accountId: string;
+    context: string;
+    snapshotId: string;
+    ruleVersion: string;
+    promptVersion: string;
+    model: string;
+}
+
 export class ExplanationRepository extends DatabaseRepository {
     /**
      * Idempotent on the natural key. A repeated insert returns the stored row so the caller's
@@ -28,20 +52,7 @@ export class ExplanationRepository extends DatabaseRepository {
     async insertPending(row: InsertExplanation): Promise<Explanation> {
         const [inserted] = await this.database.insert(ExplanationEntity)
             .values(row)
-            .onConflictDoNothing({
-                target: [
-                    ExplanationEntity.accountId,
-                    ExplanationEntity.context,
-                    ExplanationEntity.entityType,
-                    ExplanationEntity.entityId,
-                    ExplanationEntity.filterHash,
-                    ExplanationEntity.snapshotId,
-                    ExplanationEntity.evidenceHash,
-                    ExplanationEntity.ruleVersion,
-                    ExplanationEntity.promptVersion,
-                    ExplanationEntity.model,
-                ],
-            })
+            .onConflictDoNothing({target: NATURAL_KEY_COLUMNS})
             .returning();
 
         if (inserted !== undefined) return inserted;
@@ -52,6 +63,35 @@ export class ExplanationRepository extends DatabaseRepository {
         }
 
         return existing;
+    }
+
+    /**
+     * One statement for the whole batch. Rows already stored are skipped, so the caller reads them
+     * back with {@link findBatch} and never re-inserts per row.
+     */
+    async insertPendingBatch(rows: InsertExplanation[]): Promise<Explanation[]> {
+        if (rows.length === 0) return [];
+
+        return await this.database.insert(ExplanationEntity)
+            .values(rows)
+            .onConflictDoNothing({target: NATURAL_KEY_COLUMNS})
+            .returning();
+    }
+
+    /** Every row sharing a scope; the caller matches them to its inputs by the rest of the key. */
+    async findBatch(scope: ExplanationScope): Promise<Explanation[]> {
+        return await this.database.select()
+            .from(ExplanationEntity)
+            .where(
+                and(
+                    eq(ExplanationEntity.accountId, scope.accountId),
+                    eq(ExplanationEntity.context, scope.context),
+                    eq(ExplanationEntity.snapshotId, scope.snapshotId),
+                    eq(ExplanationEntity.ruleVersion, scope.ruleVersion),
+                    eq(ExplanationEntity.promptVersion, scope.promptVersion),
+                    eq(ExplanationEntity.model, scope.model)
+                )
+            );
     }
 
     async findByKey(key: ExplanationKey): Promise<Explanation | null> {
@@ -91,6 +131,16 @@ export class ExplanationRepository extends DatabaseRepository {
         return entity ?? null;
     }
 
+    /** Worker-only read: the job carries an id that was already tenant-checked by `ensure`. */
+    async findByIdForWorker(id: string): Promise<Explanation | null> {
+        const [entity] = await this.database.select()
+            .from(ExplanationEntity)
+            .where(eq(ExplanationEntity.id, id))
+            .limit(1);
+
+        return entity ?? null;
+    }
+
     async markReady(id: string, patch: {text: string; source: "model"; nextCheck: string | null}): Promise<void> {
         await this.database.update(ExplanationEntity)
             .set({
@@ -104,14 +154,17 @@ export class ExplanationRepository extends DatabaseRepository {
             .where(eq(ExplanationEntity.id, id));
     }
 
-    async markFallback(id: string, patch: {text: string; nextCheck: string | null}): Promise<void> {
+    async markFallback(
+        id: string,
+        patch: {text: string; nextCheck: string | null; error?: string | null}
+    ): Promise<void> {
         await this.database.update(ExplanationEntity)
             .set({
                 state: "FALLBACK",
                 source: "template",
                 text: patch.text,
                 nextCheck: patch.nextCheck,
-                error: null,
+                error: patch.error ?? null,
                 updatedAt: new Date(),
             })
             .where(eq(ExplanationEntity.id, id));

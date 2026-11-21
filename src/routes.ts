@@ -12,6 +12,7 @@ import {AudienceController, LeadController} from "@/modules/audience";
 import {CreativeController} from "@/modules/creative";
 import {TrackingHealthController} from "@/modules/tracking-health";
 import {AlertsController} from "@/modules/alerts";
+import {ExplanationController} from "@/modules/explanations";
 
 export const routes = new Elysia({
     prefix: "/api"
@@ -30,4 +31,5 @@ export const routes = new Elysia({
     .use(LeadController)
     .use(CreativeController)
     .use(TrackingHealthController)
-    .use(AlertsController);
+    .use(AlertsController)
+    .use(ExplanationController);

@@ -1,6 +1,5 @@
 import { describe, expect, it } from "bun:test";
 import { QueueManager } from "@infra/queue";
-import { redisConnection } from "@infra/redis";
 
 describe("QueueManager", () => {
     it("adds job with correct jobName and closes gracefully", async () => {
@@ -10,7 +9,8 @@ describe("QueueManager", () => {
         expect(job.name).toBe("custom-job-name");
         expect(job.data).toEqual({ test: true });
 
+        // Only this queue closes: `redisConnection` is the suite-wide singleton, and quitting it here
+        // would break every later file that enqueues a job.
         await qm.close();
-        await redisConnection.quit();
     });
 });

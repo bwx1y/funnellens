@@ -11,6 +11,8 @@ import {bucketIndex, dateRange} from "@shared/dates";
 import {round4} from "@shared/numbers";
 import {resolvePeriod} from "@shared/period";
 import {funnelHealth, type FunnelHealthResult, type HealthBadge} from "@shared/health";
+import {ExplanationService, type ExplanationRef} from "@/modules/explanations/service";
+import {formatMoney, formatNumber, formatPercent} from "@/modules/explanations/rules";
 import {
     FUNNEL_STAGES,
     buildFunnelPairs,
@@ -105,6 +107,7 @@ export interface SummaryResponse {
     };
     campaigns: SummaryCampaignRow[];
     sample: {n: number; denominator: number; eligible: boolean; gate: string};
+    explanation: ExplanationRef | null;
 }
 
 export interface FunnelQuery {
@@ -159,6 +162,7 @@ export interface LeakageResponse {
     impactMinor: null;
     impactCaption: string | null;
     note: string | null;
+    explanation: ExplanationRef | null;
 }
 
 export interface StageComparisonRow {
@@ -196,6 +200,7 @@ export class AnalyticsService {
         private readonly trackingHealthRepo = new TrackingHealthRepository(),
         private readonly campaignRepo = new CampaignRepository(),
         private readonly alertRepo = new InsightAlertRepository(),
+        private readonly explanations = new ExplanationService()
     ) {}
 
     async getSummary(tenantId: string, query: SummaryQuery): Promise<SummaryResponse> {
@@ -360,6 +365,25 @@ export class AnalyticsService {
             return summaryRow;
         });
 
+        const explanation = await this.explanations.ensure({
+            tenantId,
+            accountId,
+            context: "summary",
+            entityType: "account",
+            entityId: accountId,
+            filter: {since, until},
+            snapshotId: `${since}..${until}`,
+            facts: {
+                spend: formatMoney(current.spendMinor, account.currency),
+                leads: formatNumber(current.messagingStarted),
+                cpl: formatMoney(cplQualified, account.currency),
+                health: formatNumber(health.score),
+                badge: health.badge ?? "belum ada",
+                hot: formatNumber(hotLeadCount),
+            },
+            evidenceIds: activeAlerts.map((alert) => String(alert.id)),
+        });
+
         return {
             period: {since, until, days},
             previousPeriod: {since: previousSince, until: previousUntil},
@@ -391,6 +415,7 @@ export class AnalyticsService {
                 eligible: current.impressions >= 100,
                 gate: "≥ 100 tayangan",
             },
+            explanation,
         };
     }
 
@@ -471,8 +496,28 @@ export class AnalyticsService {
                 note: funnel.pairs.some((pair) => pair.eligible)
                     ? "Tidak ada transisi yang menurun pada periode ini."
                     : "Cakupan belum cukup untuk membandingkan konversi.",
+                explanation: null,
             };
         }
+
+        const direction = leak.deltaPp === null ? undefined : leak.deltaPp < 0 ? "down" : "up";
+        const explanation = await this.explanations.ensure({
+            tenantId,
+            accountId: query.accountId,
+            context: "funnel_leak",
+            entityType: "account",
+            entityId: query.accountId,
+            filter: {since: period.since, until: period.until},
+            snapshotId: `${period.since}..${period.until}`,
+            facts: {
+                previous: formatPercent(leak.baseline),
+                current: formatPercent(leak.rate),
+                transition: `${leak.from}→${leak.to}`,
+                gap: formatNumber(leak.estimatedGap),
+                ...(direction === undefined ? {} : {__direction: direction}),
+            },
+            evidenceIds: [],
+        });
 
         return {
             transition: `${leak.from}→${leak.to}`,
@@ -489,6 +534,7 @@ export class AnalyticsService {
             impactMinor: null,
             impactCaption: leak.estimatedGap === null ? null : leakageCaption(leak.estimatedGap),
             note: null,
+            explanation,
         };
     }
 

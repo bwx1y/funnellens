@@ -14,10 +14,12 @@ import type {IMetaAdStudiesAdapter} from "@infra/meta/base.meta";
 import {BadRequestError, NotFoundError} from "@shared/errors";
 import {Config} from "@/config";
 import {addDays, dateRange, dayCount, endOfDayUtc, startOfDayUtc} from "@shared/dates";
-import {round4} from "@shared/numbers";
+import {median, round4} from "@shared/numbers";
 import {resolvePeriod, type ResolvedPeriod} from "@shared/period";
 import type {SampleBlock} from "@shared/funnel";
 import {CreativeTaggingQueue} from "@/modules/creative/queue";
+import {ExplanationService, type ExplanationRef} from "@/modules/explanations/service";
+import {formatNumber, formatPercent} from "@/modules/explanations/rules";
 import {
     MIN_COMPARATORS,
     PATTERN_MIN_CREATIVES,
@@ -134,6 +136,7 @@ export interface CreativeListResponse {
     creatives: CreativeRow[];
     sample: SampleBlock;
     note?: string;
+    explanation: ExplanationRef | null;
 }
 
 export interface CreativeDetailResponse {
@@ -205,6 +208,7 @@ export interface FatigueResponse {
     creatives: FatigueRow[];
     sample: SampleBlock;
     note?: string;
+    explanation: ExplanationRef | null;
 }
 
 export interface PatternRow {
@@ -226,6 +230,7 @@ export interface PatternsResponse {
     tested: number;
     sample: SampleBlock;
     note?: string;
+    explanation: ExplanationRef | null;
 }
 
 export interface LeadQualityRow {
@@ -247,6 +252,7 @@ export interface LeadQualityResponse {
     rows: LeadQualityRow[];
     sample: SampleBlock;
     note?: string;
+    explanation: ExplanationRef | null;
 }
 
 export interface ComparisonItem {
@@ -267,6 +273,7 @@ export interface ComparisonTab {
     canCompare: boolean;
     evidenceType: "observational";
     snapshotId: number;
+    explanation: ExplanationRef | null;
 }
 
 export interface ExperimentStudy {
@@ -346,7 +353,8 @@ export class CreativeService {
         private readonly syncRunRepo = new SyncRunRepository(),
         private readonly metaConnectionRepo = new MetaConnectionRepository(),
         private readonly adStudies: IMetaAdStudiesAdapter = new FacebookSdkAdapter(),
-        private readonly taggingQueue = new CreativeTaggingQueue()
+        private readonly taggingQueue = new CreativeTaggingQueue(),
+        private readonly explanations = new ExplanationService()
     ) {}
 
     async listCreatives(tenantId: string, query: CreativeListQuery): Promise<CreativeListResponse> {
@@ -373,6 +381,22 @@ export class CreativeService {
             sortBy,
             creatives,
             sample: creativeGate(creatives.length),
+            explanation: await this.explanations.ensure({
+                tenantId,
+                accountId: query.accountId,
+                context: "creative_dimensions",
+                entityType: "account",
+                entityId: query.accountId,
+                filter: {since: period.since, until: period.until, campaignId: query.campaignId ?? ""},
+                snapshotId: `${period.since}..${period.until}`,
+                facts: {
+                    creatives: formatNumber(creatives.length),
+                    fatigued: formatNumber(creatives.filter((row) => row.fatigued).length),
+                    weak: formatNumber(creatives.filter((row) => row.status === "Pertimbangkan dihentikan").length),
+                    gate: creativeGate(creatives.length).gate,
+                },
+                evidenceIds: creatives.map((row) => row.creativeId),
+            }),
         };
         if (creatives.length === 0) response.note = EMPTY_NOTE;
 
@@ -403,10 +427,35 @@ export class CreativeService {
             return right.drop - left.drop;
         });
 
+        const fatigued = creatives.filter((row) => row.status === "Jenuh");
+        const drops = fatigued
+            .map((row) => row.drop)
+            .filter((drop): drop is number => drop !== null)
+            .map((drop) => Math.abs(drop));
+        const frequencies = fatigued
+            .map((row) => row.now.frequency)
+            .filter((frequency): frequency is number => frequency !== null);
+
         const response: FatigueResponse = {
             period: periodBlock(period),
             creatives,
             sample: creativeGate(creatives.length),
+            explanation: await this.explanations.ensure({
+                tenantId,
+                accountId: query.accountId,
+                context: "creative_fatigue",
+                entityType: "account",
+                entityId: query.accountId,
+                filter: {since: period.since, until: period.until},
+                snapshotId: `${period.since}..${period.until}`,
+                facts: {
+                    fatigued: formatNumber(fatigued.length),
+                    drop: formatPercent(median(drops)),
+                    frequency: formatNumber(frequencies.length === 0 ? null : Math.max(...frequencies)),
+                    ...(fatigued.length === 0 ? {} : {__direction: "down" as const}),
+                },
+                evidenceIds: fatigued.map((row) => row.creativeId),
+            }),
         };
         if (creatives.length === 0) response.note = EMPTY_NOTE;
 
@@ -476,6 +525,15 @@ export class CreativeService {
             if (row.significant) row.state = "eligible_for_test";
         });
 
+        const significant = attributes.filter((row) => row.significant);
+        const strongest = significant.reduce<PatternRow | null>(
+            (best, row) => best === null
+                || (row.adjustedPValue ?? Infinity) < (best.adjustedPValue ?? Infinity)
+                ? row
+                : best,
+            null
+        );
+
         const response: PatternsResponse = {
             period: periodBlock(period),
             attributes,
@@ -486,6 +544,21 @@ export class CreativeService {
                 eligible: cohortIds.size >= PATTERN_MIN_CREATIVES,
                 gate: PATTERN_GATE,
             },
+            explanation: await this.explanations.ensure({
+                tenantId,
+                accountId: query.accountId,
+                context: "creative_pattern",
+                entityType: "account",
+                entityId: query.accountId,
+                filter: {since: period.since, until: period.until},
+                snapshotId: `${period.since}..${period.until}`,
+                facts: {
+                    tested: formatNumber(attributes.filter((row) => row.pValue !== null).length),
+                    significant: formatNumber(significant.length),
+                    attribute: strongest === null ? "belum ada" : `${strongest.tagType}=${strongest.tagValue}`,
+                },
+                evidenceIds: significant.map((row) => `${row.tagType}=${row.tagValue}`),
+            }),
         };
         if (cohortIds.size < PATTERN_MIN_CREATIVES) {
             response.note = "Kreatif pada periode ini belum mencapai 8 sehingga pola belum bisa diuji.";
@@ -551,10 +624,34 @@ export class CreativeService {
             rows.push(row);
         }
 
+        const best = rows.reduce<LeadQualityRow | null>(
+            (top, row) => row.hotRate === null
+                ? top
+                : top === null || top.hotRate === null || row.hotRate > top.hotRate
+                    ? row
+                    : top,
+            null
+        );
+
         const response: LeadQualityResponse = {
             period: periodBlock(period),
             rows,
             sample: creativeGate(rows.length),
+            explanation: await this.explanations.ensure({
+                tenantId,
+                accountId: query.accountId,
+                context: "lead_quality",
+                entityType: "account",
+                entityId: query.accountId,
+                filter: {since: period.since, until: period.until},
+                snapshotId: `${period.since}..${period.until}`,
+                facts: {
+                    creatives: formatNumber(rows.length),
+                    hotRate: formatPercent(best?.hotRate ?? null),
+                    best: best === null ? "belum ada" : best.name ?? best.creativeId,
+                },
+                evidenceIds: rows.map((row) => row.creativeId),
+            }),
         };
         if (rows.length === 0) response.note = EMPTY_NOTE;
 
@@ -614,12 +711,40 @@ export class CreativeService {
             }
 
             if (items.length === 0) continue;
+
+            const left = items[0];
+            const right = items[1];
+            const delta = left !== undefined && right !== undefined
+                && left.costPerResultMinor !== null && right.costPerResultMinor !== null
+                && right.costPerResultMinor > 0
+                ? round4((left.costPerResultMinor - right.costPerResultMinor) / right.costPerResultMinor)
+                : null;
+            const direction = delta === null ? undefined : delta < 0 ? "down" : "up";
+            const metric = goal === "wa" ? "biaya per percakapan" : "biaya per hasil";
+
             tabs.push({
                 goal,
                 items,
                 canCompare: items.length >= 2,
                 evidenceType: "observational",
                 snapshotId: snapshot.id,
+                explanation: await this.explanations.ensure({
+                    tenantId,
+                    accountId: body.accountId,
+                    context: "comparison",
+                    entityType: "creative",
+                    entityId: `${ids.join("|")}:${goal}`,
+                    filter: {creativeIds: [...ids].sort(), goal},
+                    snapshotId: String(snapshot.id),
+                    facts: {
+                        left: left?.name ?? left?.creativeId ?? "kreatif",
+                        right: right?.name ?? right?.creativeId ?? "kreatif",
+                        metric,
+                        delta: formatPercent(delta),
+                        ...(direction === undefined ? {} : {__direction: direction}),
+                    },
+                    evidenceIds: ids,
+                }),
             });
         }
 

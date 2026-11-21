@@ -595,6 +595,15 @@ describe("Audience intelligence", () => {
                 warm: "2026-03-01T02:05:00.000Z",
                 hot: "2026-03-01T02:10:00.000Z",
             },
+            explanation: {
+                id: expect.any(String),
+                context: "lead_detail",
+                state: "PENDING",
+                source: null,
+                text: null,
+                evidenceIds: ["w2"],
+                snapshotId: `${SINCE}..${UNTIL}`,
+            },
         });
 
         const second = result.rows.find((entry) => entry.level === "HOT" && entry.leadId !== l1.id);
