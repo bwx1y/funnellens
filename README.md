@@ -71,7 +71,7 @@ cp .env.example .env
 # Push skema langsung ke database
 bun run db:push
 
-# Atau generate file migrasi SQL ke src/database/migration/
+# Atau generate file migrasi SQL ke src/infra/database/migration/
 bun run db:generate
 ```
 
@@ -187,7 +187,7 @@ Perilaku per event:
 - `session.authenticated` — set `status = ready`, isi `phone_number` dan `phone_name` sesi.
 - `session.disconnected` — set `status = disconnected`, lalu enqueue job `send-session-disconnected` ke `email-queue` untuk semua user `ADMIN` tenant pemilik sesi. `jobId` diisi dari `idempotencyKey`, jadi retry delivery yang sama tidak mengirim email ganda. Sesi tak dikenal, tenant kosong, atau tenant tanpa admin hanya menghasilkan log `warn` (endpoint tetap `{"status":true}`).
 - `message.received` — hanya memproses pesan masuk dari pelanggan (`!fromMe`), enqueue job ke antrean `WaWebhook-Chat` untuk diklasifikasi oleh AI worker via Gemini (`HOT`/`WARM`/`COLD`), kemudian disimpan ke riwayat pesan `wa_message`. Pesan di-buffer 10 detik per kombinasi sesi + pengirim sebelum diklasifikasi, sehingga satu batch percakapan hanya menghasilkan satu panggilan AI.
-Email notifikasi memakai template `src/utils/mail/template/session-disconnected.html` dengan subject `Sesi WhatsApp "<nama sesi>" terputus`.
+Email notifikasi memakai template `src/infra/mail/templates/session-disconnected.html` dengan subject `Sesi WhatsApp "<nama sesi>" terputus`.
 
 ---
 
@@ -195,46 +195,49 @@ Email notifikasi memakai template `src/utils/mail/template/session-disconnected.
 
 ```bash
 bun test                              # seluruh suite
-bun test tests/wa-disconnected.test.ts # satu file
+bun test tests/unit                   # unit tests saja (cepat, tanpa external service)
+bun test tests/integration/wa-disconnected.test.ts # satu file
 ```
 
 Sebagian test butuh service hidup sesuai `.env`:
-- `tests/queue.test.ts` — butuh Redis (BullMQ benar-benar antre).
-- `tests/user.test.ts` — mengimpor `app` (menyalakan listener + worker), jadi butuh PostgreSQL dan Redis.
+- `tests/integration/queue.test.ts` — butuh Redis (BullMQ benar-benar antre).
+- `tests/integration/user.test.ts` — mengimpor `app` (menyalakan listener + worker), jadi butuh PostgreSQL dan Redis.
 
-`tests/email-token.test.ts` dan `tests/wa-disconnected.test.ts` mem-monkeypatch repository/`queue.add` sehingga tidak menyentuh DB maupun SMTP nyata.
+`tests/unit/email-token.test.ts` dan `tests/integration/wa-disconnected.test.ts` mem-monkeypatch repository/`queue.add` sehingga tidak menyentuh DB maupun SMTP nyata.
 
 ---
 
 ## Struktur Proyek
 
 ```
+scripts/                # Script utilitas dan maintenance (db-drop.ts)
+playground/             # Sandbox scripts & tools pengujian (meta-oauth.php, qr-login.html)
+tests/
+├── unit/               # Unit test (tanpa external service DB/Redis)
+└── integration/        # Integration test (DB, Redis, BullMQ)
 src/
-├── config/         # Konfigurasi env & default
-├── database/
-│   ├── entity/     # Skema tabel Drizzle & relasi
-│   ├── migration/  # File migrasi SQL Drizzle
-│   └── repository/ # Data access layer + base DatabaseRepository
-├── modules/
-│   ├── auth/       # Route, schema, service, & worker email
-│   ├── profile/    # Route, schema, & service profil user
-│   ├── user/       # Route, schema, & service manajemen user tenant
-│   ├── meta/       # Route, schema, & service koneksi Meta Ads (OAuth)
-│   ├── campaign/   # Modul campaign (dalam pengembangan)
+├── config/             # Konfigurasi env & default
+├── shared/             # Pure stateless utilities (errors.ts, jwt.ts, logger.ts, password.ts)
+├── infra/              # External infrastructure integrations & stateful clients
+│   ├── ai/             # AI provider adapters (base.ai.ts, adapters/gemini.adapter.ts)
+│   ├── database/       # Database client, migrations, schema, & repositories
+│   │   ├── schema/     # Drizzle entity & relation per domain (core/, ads/, wa/, enums.ts)
+│   │   ├── repositories/ # Repositories data-access terpusat
+│   │   └── migration/  # Snapshot & migration SQL files Drizzle
+│   ├── mail/           # Mail client (MailUtil) & templates HTML
+│   ├── queue/          # BullMQ QueueManager & WorkerManager + shutdown registry
+│   └── redis/          # Client koneksi ioredis
+├── modules/            # Domain feature modules (Modular Monolith)
+│   ├── auth/           # Route, schema, service, & worker email
+│   ├── profile/        # Route, schema, & service profil user
+│   ├── user/           # Route, schema, & service manajemen user tenant
+│   ├── meta/           # Route, schema, & service koneksi Meta Ads (OAuth)
+│   ├── campaign/       # Modul campaign
 │   └── wa/
-│       ├── session/ # Route, schema, service, & worker registrasi webhook OpenWA
-│       ├── contact/ # Route, schema, & service kontak & audience stats
-│       └── webhook/ # Route, schema, service, & worker klasifikasi pesan AI OpenWA
-├── plugins/        # Plugin Elysia (httpLogger)
-├── providers/      # Adapter AI: base.ai.ts & adapter/gemini.adapter.ts
-├── utils/
-│   ├── error/      # AppError & subclass (BadRequest, Unauthorized, Forbidden, NotFound, Conflict)
-│   ├── jwt/        # JwtUtil (verifikasi token & guard isAuthenticated)
-│   ├── logger/     # pino + pino-roll
-│   ├── mail/       # MailUtil & template HTML
-│   ├── password/   # PasswordUtil (Bun.password)
-│   ├── queue/      # QueueManager & WorkerManager (BullMQ) + registry shutdown
-│   └── redis/      # Koneksi ioredis bersama
-├── routes.ts       # Agregasi route utama (/api)
-└── index.ts        # Entrypoint server, error handler, auto-load worker, listener
+│       ├── session/    # Route, schema, service, & worker registrasi webhook OpenWA
+│       ├── contact/    # Route, schema, & service kontak & audience stats
+│       └── webhook/    # Route, schema, service, & worker klasifikasi pesan AI OpenWA
+├── plugins/            # Plugin Elysia (logger.plugin.ts)
+├── routes.ts           # Agregasi route utama (/api)
+└── index.ts            # Entrypoint server, error handler, auto-load worker, listener
 ```
