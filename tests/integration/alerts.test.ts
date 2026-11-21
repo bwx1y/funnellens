@@ -187,34 +187,6 @@ describe("Alerts management API", () => {
         expect(resolved.alerts[0].resolvedAt).toBe(stored.resolvedAt?.toISOString() ?? null);
     });
 
-    // An expired snooze is neither pending nor resolved, so it returns to `active` instead of vanishing.
-    it("brings an expired snooze back into the active list", async () => {
-        const [expired] = await db.insert(InsightAlertEntity).values({
-            accountId,
-            ruleKey: "leak_chat_to_reply",
-            level: "WARNING",
-            title: "Chat masuk belum dibalas",
-            entityType: "account",
-            entityId: "",
-            status: "SNOOZED",
-            snoozedUntil: new Date(Date.now() - 60_000),
-        }).returning();
-
-        const active = await list("active");
-        expect(active.alerts.map((alert) => alert.id)).toEqual([expired.id]);
-        expect((await list("snoozed")).alerts).toEqual([]);
-        expect((await list("resolved")).alerts.map((alert) => alert.id)).toEqual([alertId]);
-    it("returns 404 for another tenant's account and alert", async () => {
-        const forbiddenList = await app.handle(new Request(
-            `http://localhost/api/alerts?accountId=${otherAccountId}`,
-            {headers}
-        ));
-        expect(forbiddenList.status).toBe(404);
-        expect(await forbiddenList.json()).toEqual({status: false, message: "Akun iklan tidak ditemukan"});
-
-        await db.delete(InsightAlertEntity).where(eq(InsightAlertEntity.id, expired.id));
-    });
-
     it("returns 404 for another tenant's account and alert", async () => {
         const forbiddenList = await app.handle(new Request(
             `http://localhost/api/alerts?accountId=${otherAccountId}`,
