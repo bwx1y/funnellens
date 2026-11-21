@@ -1,13 +1,13 @@
-import {WaMessageRepository} from "@/database/repository/wa-message.repository";
+import {WaPhoneRepository} from "@/database/repository/wa-phone.repository";
 
 export class WaContactService {
-    private readonly waMessageRepository = new WaMessageRepository()
+    private readonly waPhoneRepository = new WaPhoneRepository();
 
     async getAll(tenantId: string, sessionId?: string) {
-        return this.waMessageRepository.findAllByTenantIdGroupByPhone(tenantId, sessionId)
+        return this.waPhoneRepository.findAllByTenantId(tenantId, sessionId);
     }
 
     async stats(tenantId: string) {
-        return this.waMessageRepository.getAudienceLevelStats(tenantId)
+        return this.waPhoneRepository.getAudienceLevelStats(tenantId);
     }
 }

@@ -5,6 +5,7 @@ import {logger} from "@/utils/logger";
 import {Config} from "@/config";
 import {OpenWAClient} from "@rmyndharis/openwa";
 import {WaMessageRepository} from "@/database/repository/wa-message.repository";
+import {WaPhoneRepository} from "@/database/repository/wa-phone.repository";
 import {encode, decode} from "@toon-format/toon";
 import {GeminiAdapter} from "@/providers/ai/adapter/gemini.adapter";
 import type {AIMessage} from "@/providers/ai/types";
@@ -62,6 +63,7 @@ const openWa = new OpenWAClient({
 });
 
 const messageRepository = new WaMessageRepository();
+const phoneRepository = new WaPhoneRepository();
 const gemini = new GeminiAdapter();
 
 const parseToonSafely = <T>(rawText: string): T => {
@@ -148,15 +150,22 @@ export const WaWebhookWorker = new WorkerManager<ProcessMessageJob>(
                 phone = result.number || phone;
             }
 
+            const phoneName = messages.find(m => m.contact?.pushName)?.contact?.pushName ?? data.contact?.pushName;
+
+            const phoneRecord = await phoneRepository.upsert({
+                sessionId: data.session,
+                phone,
+                phoneName,
+                status: content.lead_type,
+            });
+
             // Simpan setiap pesan yang terkumpul ke repository
             for (const msg of messages) {
                 await messageRepository.create({
+                    phoneId: phoneRecord.id,
                     status: content.lead_type,
-                    phoneName: msg.contact?.pushName ?? data.contact?.pushName,
-                    phone,
                     content: msg.body,
                     score: content.confidence_score,
-                    sessionId: data.session,
                 });
             }
 

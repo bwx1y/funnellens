@@ -2,7 +2,7 @@ import {isNull, relations} from "drizzle-orm";
 import {pgEnum, pgTable, uuid, varchar} from "drizzle-orm/pg-core";
 import {UserTokenRelationship} from "@/database/entity/user-token.entity";
 import {TenantEntity} from "@/database/entity/tenant.entity";
-import {WaMessageEntity} from "@/database/entity/wa-message.entity";
+import {WaPhoneEntity} from "@/database/entity/wa-phone.entity";
 
 export const WaSessionStatusEnum = pgEnum("session-status", ["created", "initializing", "qr_ready", "authenticating", "ready", "disconnected", "action_required", "failed"])
 
@@ -22,5 +22,5 @@ export const WaSessionRelationship = relations(WaSessionEntity, ({one, many}) =>
         fields: [WaSessionEntity.tenantId],
         references: [TenantEntity.id]
     }),
-    message: many(WaMessageEntity)
+    phones: many(WaPhoneEntity)
 }))
