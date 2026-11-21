@@ -20,6 +20,7 @@ import {AdSetEntity} from "@db/schema/ads/ad-set.entity";
 import {AdEntity} from "@db/schema/ads/ad.entity";
 import {AdCreativeEntity} from "@db/schema/ads/ad-creative.entity";
 import {AdInsightDailyEntity} from "@db/schema/ads/ad-insight-daily.entity";
+import {AdInsightMetricsView} from "@db/schema/ads/ad-insight-metrics.view";
 import {AdInsightBreakdownDailyEntity} from "@db/schema/ads/ad-insight-breakdown-daily.entity";
 import {CreativeTagEntity} from "@db/schema/ads/creative-tag.entity";
 import {LeadMilestoneEntity} from "@db/schema/wa/lead-milestone.entity";
@@ -232,6 +233,30 @@ describe("Analytics and ingest repositories", () => {
         const emptyCampaign = await analyticsRepo.getFunnelCounts(accountId, DAY, DAY_END, emptyCampaignId);
         expect(emptyCampaign.impressions).toBe(0);
         expect(emptyCampaign.purchaseValueMinor).toBe(0);
+    });
+
+    it("ad_insight_metrics exposes one row per insight with resolved objective group and results", async () => {
+        const rows = await db.select()
+            .from(AdInsightMetricsView)
+            .where(eq(AdInsightMetricsView.accountId, accountId))
+            .orderBy(AdInsightMetricsView.adId);
+
+        expect(rows.length).toBe(2);
+        expect(rows[0].adId).toBe(ad1);
+        expect(rows[0].objectiveGroup).toBe("wa");
+        expect(Number(rows[0].leads)).toBe(5);
+        expect(Number(rows[0].purchases)).toBe(1);
+        expect(rows[0].purchaseValueMinor).toBe(300000);
+        expect(Number(rows[0].lpv)).toBe(30);
+        expect(Number(rows[0].viewContent)).toBe(20);
+        expect(Number(rows[0].addToCart)).toBe(10);
+        expect(Number(rows[0].results)).toBe(5);
+
+        expect(rows[1].adId).toBe(ad2);
+        expect(Number(rows[1].leads)).toBe(2);
+        expect(Number(rows[1].purchases)).toBe(0);
+        expect(rows[1].purchaseValueMinor).toBe(0);
+        expect(Number(rows[1].results)).toBe(2);
     });
 
     it("getLeadStageCounts counts the observed cohort", async () => {
