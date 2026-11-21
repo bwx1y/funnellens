@@ -172,6 +172,26 @@ export interface MetaCustomPeriodMetricsDto {
     raw: Record<string, unknown>;
 }
 
+/** `GET /act_{id}/adspixels`: one Meta Pixel with the fields tracking health reports on. */
+export interface MetaAdPixelDto {
+    id: string;
+    name: string | null;
+    code: string | null;
+    lastFiredTime: Date | null;
+    /** Match keys Meta already has for the pixel; empty when the field was not reported. */
+    automaticMatchingFields: string[];
+}
+
+/** One row of `GET /{pixel_id}/stats?aggregation=event`; an unreported count stays `null`. */
+export interface MetaPixelStatsRowDto {
+    eventName: string;
+    browserCount: number | null;
+    serverCount: number | null;
+    duplicateCount: number | null;
+    matchQuality: number | null;
+    raw: Record<string, unknown>;
+}
+
 /** `GET /{metaUserId}/ad_studies`: an A/B study shell; results only exist once Meta publishes them. */
 export interface MetaAdStudyDto {
     id: string;

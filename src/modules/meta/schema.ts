@@ -62,6 +62,9 @@ export const MetaSchema = {
     queueTrailingSync: t.Optional(t.Object({
         accountId: t.Optional(t.String()),
     })),
+    queuePixelStatsSync: t.Optional(t.Object({
+        accountId: t.Optional(t.String()),
+    })),
 }
 
 export type MetaSchema = {

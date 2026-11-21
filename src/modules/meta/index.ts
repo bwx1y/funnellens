@@ -130,4 +130,19 @@ export const MetaController = new Elysia({
             detail: {
                 summary: "Enqueue background trailing 28-day re-sync job"
             }
+        })
+    .post("/queue/sync-pixels",
+        async ({user, body}) => {
+            await metaSyncQueue.add("sync-pixel-stats", {
+                userId: user.iss,
+                tenantId: user.tenantId,
+                accountId: body?.accountId,
+            });
+            return {message: "Pixel stats sync job queued successfully"};
+        },
+        {
+            body: MetaSchema.queuePixelStatsSync,
+            detail: {
+                summary: "Enqueue background pixel stats sync job"
+            }
         });

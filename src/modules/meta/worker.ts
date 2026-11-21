@@ -7,6 +7,7 @@ import {
     type MetaSyncTrailingJobPayload,
 } from "./queue";
 import {MetaService} from "./service";
+import {PixelStatsSyncService} from "./pixel-stats.service";
 import {MetaConnectionRepository} from "@db/repositories/meta-connection.repository";
 import {AdAccountRepository} from "@db/repositories/ad-account.repository";
 import {logger} from "@shared/logger";
@@ -15,7 +16,8 @@ export class MetaSyncWorkerProcessor {
     constructor(
         private readonly metaService = new MetaService(),
         private readonly metaConnectionRepo = new MetaConnectionRepository(),
-        private readonly adAccountRepo = new AdAccountRepository()
+        private readonly adAccountRepo = new AdAccountRepository(),
+        private readonly pixelStatsService = new PixelStatsSyncService()
     ) {}
 
     async process(job: Job<MetaSyncJobData, void, MetaSyncJobName>): Promise<void> {
@@ -30,6 +32,8 @@ export class MetaSyncWorkerProcessor {
                 await this.handleMasterSync(job.data);
             } else if (job.name === "sync-hourly-breakdowns") {
                 await this.handleHourlyBreakdownSync(job.data as MetaSyncHourlyBreakdownsJobPayload);
+            } else if (job.name === "sync-pixel-stats") {
+                await this.handlePixelStatsSync(job.data);
             } else {
                 logger.warn({jobName: job.name}, "Unknown Meta sync job name");
             }
@@ -94,6 +98,13 @@ export class MetaSyncWorkerProcessor {
                 {iss: target.userId, tenantId: target.tenantId},
                 {accountId: target.accountId, since, until}
             );
+        }
+    }
+
+    private async handlePixelStatsSync(data: MetaSyncJobData): Promise<void> {
+        const targets = await this.resolveSyncTargets(data);
+        for (const target of targets) {
+            await this.pixelStatsService.sync(target.tenantId, target.accountId);
         }
     }
 

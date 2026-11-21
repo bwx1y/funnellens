@@ -1,9 +1,10 @@
 import bizSdk from "facebook-nodejs-business-sdk";
 import {createHash} from "node:crypto";
-import type {IMetaAdsAdapter, IMetaAdStudiesAdapter} from "../base.meta";
+import type {IMetaAdsAdapter, IMetaAdStudiesAdapter, IMetaPixelAdapter} from "../base.meta";
 import type {
     MetaAdAccountDto,
     MetaAdCreativeDto,
+    MetaAdPixelDto,
     MetaAdStudyDto,
     MetaAdDto,
     MetaAdInsightActionDto,
@@ -12,6 +13,7 @@ import type {
     MetaAdSetDto,
     MetaCampaignDto,
     MetaCustomPeriodMetricsDto,
+    MetaPixelStatsRowDto,
     MetaVideoDto,
 } from "../types";
 import {logger} from "@shared/logger";
@@ -36,7 +38,7 @@ function parseHourOfDay(value: unknown): number | null {
     return hour >= 0 && hour <= 23 ? hour : null;
 }
 
-export class FacebookSdkAdapter implements IMetaAdsAdapter, IMetaAdStudiesAdapter {
+export class FacebookSdkAdapter implements IMetaAdsAdapter, IMetaAdStudiesAdapter, IMetaPixelAdapter {
     private initApi(accessToken: string): void {
         bizSdk.FacebookAdsApi.init(accessToken);
     }
@@ -752,17 +754,129 @@ export class FacebookSdkAdapter implements IMetaAdsAdapter, IMetaAdStudiesAdapte
             throw error;
         }
     }
+
+    /** `adspixels` is the pixel inventory: id, code, last fire time, and the match keys Meta already has. */
+    async getAdPixels(
+        accessToken: string,
+        accountId: string
+    ): Promise<{hasAccess: boolean; pixels: MetaAdPixelDto[]}> {
+        this.initApi(accessToken);
+        const normalizedAccountId = accountId.startsWith("act_") ? accountId : `act_${accountId}`;
+        const account = new bizSdk.AdAccount(normalizedAccountId);
+
+        const fields = ["id", "name", "code", "last_fired_time", "automatic_matching_fields"];
+
+        try {
+            const rows = await this.fetchAllSdk(
+                (f, p) => account.getAdsPixels(f, p) as Promise<SdkCursor>,
+                fields,
+                {limit: 100}
+            );
+
+            return {
+                hasAccess: true,
+                pixels: rows.map((row) => ({
+                    id: String(row.id),
+                    name: row.name ? String(row.name) : null,
+                    code: row.code ? String(row.code) : null,
+                    lastFiredTime: parseDate(row.last_fired_time),
+                    automaticMatchingFields: Array.isArray(row.automatic_matching_fields)
+                        ? row.automatic_matching_fields.map(String)
+                        : [],
+                })),
+            };
+        } catch (error) {
+            if (isPermissionError(error)) return {hasAccess: false, pixels: []};
+            throw error;
+        }
+    }
+
+    /**
+     * `aggregation=event` splits every event into browser and server counts. Meta only reports the
+     * split for pixels with CAPI traffic, so an absent key maps to `null` — never to `0`.
+     */
+    async getPixelStats(
+        accessToken: string,
+        pixelId: string,
+        options: {since: string; until: string}
+    ): Promise<{hasAccess: boolean; rows: MetaPixelStatsRowDto[]}> {
+        this.initApi(accessToken);
+        const pixel = new bizSdk.AdsPixel(pixelId);
+
+        try {
+            const rows = await this.fetchAllSdk(
+                (f, p) => pixel.getStats(f, p) as Promise<SdkCursor>,
+                ["data"],
+                {aggregation: "event", start_time: options.since, end_time: options.until}
+            );
+
+            const mapped: MetaPixelStatsRowDto[] = [];
+            for (const row of rows) {
+                const eventName = String(row.value ?? row.event_name ?? "");
+                if (eventName === "") continue;
+
+                mapped.push({
+                    eventName,
+                    browserCount: pickNumber(row, ["browser_count", "browserCount", "browser"]),
+                    serverCount: pickNumber(row, ["server_count", "serverCount", "server"]),
+                    duplicateCount: pickNumber(row, ["duplicate_count", "duplicateCount", "duplicate"]),
+                    matchQuality: pickNumber(row, [
+                        "match_quality",
+                        "matchQuality",
+                        "emq",
+                        "event_match_quality",
+                    ]),
+                    raw: row,
+                });
+            }
+
+            return {hasAccess: true, rows: mapped};
+        } catch (error) {
+            // `/stats` refuses a token without the pixel permission with a plain HTTP 403.
+            if (isPermissionError(error)) return {hasAccess: false, rows: []};
+            throw error;
+        }
+    }
 }
 
-/** Graph permission failures: codes 10/200/294, or an OAuth message that names the permission. */
+function parseDate(value: unknown): Date | null {
+    if (value == null) return null;
+
+    const date = new Date(String(value));
+    return Number.isNaN(date.getTime()) ? null : date;
+}
+
+/** Meta mixes numbers and numeric strings across pixel payloads; anything else stays `null`. */
+function pickNumber(row: Record<string, unknown>, keys: string[]): number | null {
+    for (const key of keys) {
+        const value = row[key];
+        if (typeof value === "number") return Number.isFinite(value) ? value : null;
+        if (typeof value === "string" && value.trim() !== "") {
+            const parsed = Number(value);
+            if (Number.isFinite(parsed)) return parsed;
+        }
+    }
+
+    return null;
+}
+
+/** Graph permission failures: codes 10/200/294, an HTTP 403, or an OAuth message naming the permission. */
 function isPermissionError(error: unknown): boolean {
     if (error === null || typeof error !== "object") return false;
 
-    const candidate = error as {code?: unknown; message?: unknown; response?: {code?: unknown; message?: unknown}};
+    const candidate = error as {
+        code?: unknown;
+        status?: unknown;
+        message?: unknown;
+        response?: {code?: unknown; status?: unknown; message?: unknown};
+    };
     const code = candidate.code ?? candidate.response?.code;
     if (code === 10 || code === 200 || code === 294 || code === "10" || code === "200" || code === "294") {
         return true;
     }
+
+    const status = candidate.status ?? candidate.response?.status;
+    if (status === 403 || status === "403") return true;
 
     const message = candidate.message ?? candidate.response?.message;
     return typeof message === "string" && message.toLowerCase().includes("permission");

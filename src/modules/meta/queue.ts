@@ -33,7 +33,12 @@ export type MetaSyncJobData =
     | MetaSyncMasterJobPayload
     | MetaSyncHourlyBreakdownsJobPayload;
 
-export type MetaSyncJobName = "sync-daily" | "re-sync-trailing" | "sync-master" | "sync-hourly-breakdowns";
+export type MetaSyncJobName =
+    | "sync-daily"
+    | "re-sync-trailing"
+    | "sync-master"
+    | "sync-hourly-breakdowns"
+    | "sync-pixel-stats";
 
 export const META_SYNC_QUEUE_NAME = "meta-sync";
 
@@ -75,6 +80,14 @@ export class MetaSyncQueue extends QueueManager<MetaSyncJobData, void, MetaSyncJ
         }, {
             name: "re-sync-trailing",
             data: {daysBack: 28},
+        });
+
+        // Pixel stats: once a day at 01:30 UTC, after the midnight insight sync settles
+        await this.instance.upsertJobScheduler("sync-pixel-stats", {
+            pattern: "30 1 * * *",
+        }, {
+            name: "sync-pixel-stats",
+            data: {},
         });
     }
 }

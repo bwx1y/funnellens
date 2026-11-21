@@ -347,7 +347,7 @@ describe("Database repositories", () => {
             serverCount: 90,
             dedupRate: "0.800000",
             matchQuality: "5.50",
-            status: "Perlu Optimalisasi",
+            status: "Perlu optimalisasi",
         };
 
         await trackingHealthRepo.upsertDaily(base);

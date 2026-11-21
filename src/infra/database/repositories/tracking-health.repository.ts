@@ -13,18 +13,18 @@ export interface TrackingHealthSummary {
     serverCount: number;
     dedupRate: number | null;
     matchQuality: number | null;
-    status: "Sehat" | "Perlu Optimalisasi" | "Bermasalah" | null;
+    status: "Sehat" | "Perlu optimalisasi" | "Bermasalah" | null;
 }
 
 const STATUS_RANK = {
     "Sehat": 1,
-    "Perlu Optimalisasi": 2,
+    "Perlu optimalisasi": 2,
     "Bermasalah": 3,
 } as const;
 
 const STATUS_BY_RANK = {
     1: "Sehat",
-    2: "Perlu Optimalisasi",
+    2: "Perlu optimalisasi",
     3: "Bermasalah",
 } as const;
 

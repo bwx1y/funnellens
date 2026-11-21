@@ -6,8 +6,10 @@ import type {
     MetaAdInsightDailyDto,
     MetaAdSetDto,
     MetaAdStudyDto,
+    MetaAdPixelDto,
     MetaCampaignDto,
     MetaCustomPeriodMetricsDto,
+    MetaPixelStatsRowDto,
     MetaVideoDto,
 } from "./types";
 
@@ -66,4 +68,23 @@ export interface IMetaAdsAdapter {
 export interface IMetaAdStudiesAdapter {
     /** Missing permission → `{hasAccess: false, studies: []}`; every other failure is thrown. */
     getAdStudies(accessToken: string, metaUserId: string): Promise<{hasAccess: boolean; studies: MetaAdStudyDto[]}>;
+}
+
+/**
+ * Same reason as `IMetaAdStudiesAdapter`: pixel edges live apart from the ads adapter so the existing
+ * test doubles of `IMetaAdsAdapter` stay valid.
+ */
+export interface IMetaPixelAdapter {
+    /** Missing permission → `{hasAccess: false, pixels: []}`; every other failure is thrown. */
+    getAdPixels(
+        accessToken: string,
+        accountId: string
+    ): Promise<{hasAccess: boolean; pixels: MetaAdPixelDto[]}>;
+
+    /** Missing permission or HTTP 403 → `{hasAccess: false, rows: []}`; every other failure is thrown. */
+    getPixelStats(
+        accessToken: string,
+        pixelId: string,
+        options: {since: string; until: string}
+    ): Promise<{hasAccess: boolean; rows: MetaPixelStatsRowDto[]}>;
 }
