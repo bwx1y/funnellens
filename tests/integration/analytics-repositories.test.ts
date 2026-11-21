@@ -213,6 +213,7 @@ describe("Analytics and ingest repositories", () => {
 
     it("getFunnelCounts aggregates the funnel and honors campaign and objective filters", async () => {
         const expected = {
+            spendMinor: 150000,
             impressions: 1500,
             linkClicks: 45,
             lpv: 30,
@@ -220,6 +221,7 @@ describe("Analytics and ingest repositories", () => {
             addToCart: 10,
             purchase: 1,
             messagingStarted: 7,
+            results: 7,
             purchaseValueMinor: 300000,
         };
 

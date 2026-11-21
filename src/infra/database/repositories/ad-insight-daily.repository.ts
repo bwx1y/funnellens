@@ -32,6 +32,7 @@ export interface DailyTrendPoint {
     date: string;
     spendMinor: number;
     leads: number;
+    purchaseValueMinor: number;
 }
 
 export interface CampaignPerformance {
@@ -62,6 +63,7 @@ interface DailyTrendRow {
     date: string;
     spend_minor: string;
     leads: string;
+    purchase_value_minor: string;
 }
 
 interface CampaignPerformanceRow {
@@ -134,7 +136,8 @@ export class AdInsightDailyRepository extends DatabaseRepository {
         const rows = await this.database.execute(sql`
             select i.date::text                       as date,
                    coalesce(sum(i.spend_minor), 0)    as spend_minor,
-                   coalesce(sum(i.leads), 0)          as leads
+                   coalesce(sum(i.leads), 0)          as leads,
+                   coalesce(sum(i.purchase_value_minor), 0) as purchase_value_minor
             from ad_insight_metrics i
             where ${this.scopeFilter(accountId, since, until, campaignId)}
             group by i.date
@@ -145,6 +148,7 @@ export class AdInsightDailyRepository extends DatabaseRepository {
             date: row.date,
             spendMinor: Number(row.spend_minor),
             leads: Number(row.leads),
+            purchaseValueMinor: Number(row.purchase_value_minor),
         }));
     }
 

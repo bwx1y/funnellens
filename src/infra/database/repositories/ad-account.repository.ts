@@ -1,6 +1,9 @@
 import {DatabaseRepository} from "./base.repository";
 import {AdAccountEntity} from "@db/schema/ads/ad-account.entity";
 import {and, eq} from "drizzle-orm";
+import {NotFoundError} from "@shared/errors";
+
+export type AdAccount = typeof AdAccountEntity.$inferSelect;
 
 export class AdAccountRepository extends DatabaseRepository {
     async findByTenantId(tenantId: string): Promise<(typeof AdAccountEntity.$inferSelect)[]> {
@@ -93,4 +96,13 @@ export class AdAccountRepository extends DatabaseRepository {
             return selected ?? null;
         });
     }
+}
+
+const adAccountScopeRepository = new AdAccountRepository();
+
+/** Throws `NotFoundError` when the account is missing or belongs to another tenant. */
+export async function requireAccountScope(tenantId: string, accountId: string): Promise<AdAccount> {
+    const account = await adAccountScopeRepository.findById(accountId, tenantId);
+    if (account === null) throw new NotFoundError("Akun iklan tidak ditemukan");
+    return account;
 }

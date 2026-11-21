@@ -4,13 +4,17 @@ import {eq, sql} from "drizzle-orm";
 import {ATTRIBUTION_WINDOW} from "./ad-insight-daily.repository";
 
 export interface FunnelCounts {
+    spendMinor: number;
     impressions: number;
+    /** `inline_link_clicks`: the denominator of the funnel conversion ratio. */
     linkClicks: number;
     lpv: number;
     viewContent: number;
     addToCart: number;
     purchase: number;
     messagingStarted: number;
+    /** Objective-aware conversions from the `ad_insight_metrics` view (`leads` for WA, `purchases` for web). */
+    results: number;
     purchaseValueMinor: number;
 }
 
@@ -75,6 +79,7 @@ export interface TrackingSummary {
 }
 
 interface FunnelRow {
+    spend_minor: string;
     impressions: string;
     link_clicks: string;
     lpv: string;
@@ -82,6 +87,7 @@ interface FunnelRow {
     add_to_cart: string;
     purchase: string;
     messaging_started: string;
+    results: string;
     purchase_value_minor: string;
 }
 
@@ -91,6 +97,18 @@ interface LeadStageRow {
     qualified: string;
     closed: string;
     first_hot: string;
+}
+
+interface DailyQualifiedRow {
+    date: string;
+    leads: string;
+    qualified: string;
+}
+
+interface CampaignLeadRow {
+    campaign_id: string;
+    attributed_leads: string;
+    hot_leads: string;
 }
 
 interface LeadReplyRow {
@@ -165,6 +183,7 @@ export class AnalyticsRepository extends DatabaseRepository {
     ): Promise<FunnelCounts> {
         const rows = await this.database.execute(sql`
             select
+                coalesce(sum(i.spend_minor), 0)            as spend_minor,
                 coalesce(sum(i.impressions), 0)            as impressions,
                 coalesce(sum(i.inline_link_clicks), 0)     as link_clicks,
                 coalesce(sum(i.lpv), 0)                    as lpv,
@@ -172,6 +191,7 @@ export class AnalyticsRepository extends DatabaseRepository {
                 coalesce(sum(i.add_to_cart), 0)            as add_to_cart,
                 coalesce(sum(i.purchases), 0)              as purchase,
                 coalesce(sum(i.leads), 0)                  as messaging_started,
+                coalesce(sum(i.results), 0)                as results,
                 coalesce(sum(i.purchase_value_minor), 0)   as purchase_value_minor
             from ad_insight_metrics i
             where ${this.insightScope(accountId, since, until, {campaignId, objectiveGroup})}
@@ -179,6 +199,7 @@ export class AnalyticsRepository extends DatabaseRepository {
 
         const row = rows[0];
         return {
+            spendMinor: Number(row.spend_minor),
             impressions: Number(row.impressions),
             linkClicks: Number(row.link_clicks),
             lpv: Number(row.lpv),
@@ -186,6 +207,7 @@ export class AnalyticsRepository extends DatabaseRepository {
             addToCart: Number(row.add_to_cart),
             purchase: Number(row.purchase),
             messagingStarted: Number(row.messaging_started),
+            results: Number(row.results),
             purchaseValueMinor: Number(row.purchase_value_minor),
         };
     }
@@ -228,6 +250,66 @@ export class AnalyticsRepository extends DatabaseRepository {
             closed: Number(row.closed),
             firstHot: Number(row.first_hot),
         };
+    }
+
+    /** Daily leads and qualified leads (stages `QUALIFIED`/`CLOSING`), one row per UTC date. */
+    async getDailyQualifiedLeads(
+        accountId: string,
+        since: Date,
+        until: Date,
+        campaignId?: string
+    ): Promise<{date: string; leads: number; qualified: number}[]> {
+        const rows = await this.database.execute(sql`
+            select (l.first_seen_at at time zone 'UTC')::date::text as date,
+                   count(*)                                             as leads,
+                   count(*) filter (where l.stage in ('QUALIFIED', 'CLOSING')) as qualified
+            from leads l
+            where l.account_id = ${accountId}
+              and l.first_seen_at >= ${since.toISOString()}::timestamptz
+              and l.first_seen_at <= ${until.toISOString()}::timestamptz
+              ${campaignId === undefined ? sql`` : sql`and l.campaign_id = ${campaignId}`}
+            group by 1
+            order by 1 asc
+        `) as unknown as DailyQualifiedRow[];
+
+        return rows.map((row) => ({
+            date: row.date,
+            leads: Number(row.leads),
+            qualified: Number(row.qualified),
+        }));
+    }
+
+    /**
+     * Attributed leads and the subset that turned HOT inside the period, per campaign.
+     * The milestone join is period-scoped so a lead whose HOT event falls outside the window is not hot.
+     */
+    async getCampaignLeadMetrics(
+        accountId: string,
+        since: Date,
+        until: Date
+    ): Promise<{campaignId: string; attributedLeads: number; hotLeads: number}[]> {
+        const rows = await this.database.execute(sql`
+            select l.campaign_id                            as campaign_id,
+                   count(*)                                 as attributed_leads,
+                   count(*) filter (where m.lead_id is not null) as hot_leads
+            from leads l
+            left join lead_milestones m
+                   on m.lead_id = l.id
+                  and m.level = 'HOT'
+                  and m.first_at >= ${since.toISOString()}::timestamptz
+                  and m.first_at <= ${until.toISOString()}::timestamptz
+            where l.account_id = ${accountId}
+              and l.campaign_id is not null
+              and l.first_seen_at >= ${since.toISOString()}::timestamptz
+              and l.first_seen_at <= ${until.toISOString()}::timestamptz
+            group by l.campaign_id
+        `) as unknown as CampaignLeadRow[];
+
+        return rows.map((row) => ({
+            campaignId: row.campaign_id,
+            attributedLeads: Number(row.attributed_leads),
+            hotLeads: Number(row.hot_leads),
+        }));
     }
 
     /** One row per observed lead, unreplied leads included (`replySeconds: null`). */

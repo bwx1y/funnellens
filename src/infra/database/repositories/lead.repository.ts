@@ -113,6 +113,49 @@ export class LeadRepository extends DatabaseRepository {
     }
 
     /**
+     * Share of the period's leads answered within 15 minutes. Unreplied leads stay in `totalLeads`
+     * (they are late, not excluded), so the ratio is directly comparable to a target.
+     */
+    async getReplyTimeliness(
+        accountId: string,
+        since: Date,
+        until: Date
+    ): Promise<{totalLeads: number; onTimeReplies: number}> {
+        const rows = await this.database.execute(sql`
+            select count(*) as total_leads,
+                   count(*) filter (
+                       where l.first_replied_at is not null
+                         and l.first_replied_at - l.first_seen_at <= interval '15 minutes'
+                   ) as on_time_replies
+            from leads l
+            where l.account_id = ${accountId}
+              and l.first_seen_at >= ${since.toISOString()}::timestamptz
+              and l.first_seen_at <= ${until.toISOString()}::timestamptz
+        `) as unknown as {total_leads: string; on_time_replies: string}[];
+
+        const row = rows[0];
+        return {
+            totalLeads: Number(row.total_leads),
+            onTimeReplies: Number(row.on_time_replies),
+        };
+    }
+
+    /** Account-wide backlog count; `getUnrepliedHotLeads` is capped at a page and cannot be counted on. */
+    async countUnrepliedHotLeads(accountId: string): Promise<number> {
+        const [row] = await this.database.select({total: sql<string>`count(*)`})
+            .from(LeadEntity)
+            .where(
+                and(
+                    eq(LeadEntity.accountId, accountId),
+                    eq(LeadEntity.temperature, "HOT"),
+                    isNull(LeadEntity.firstRepliedAt)
+                )
+            );
+
+        return Number(row.total);
+    }
+
+    /**
      * `avgFirstReplySeconds` is period-scoped; `stuckLeads` is the live account-wide backlog
      * (unanswered for more than 24h) and intentionally ignores `since`/`until`.
      */
