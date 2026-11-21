@@ -9,3 +9,4 @@ Daftar fitur backend yang telah selesai diimplementasikan dan diuji:
 | 03 | **Meta SDK Adapter Layer** | [`03-meta-sdk-adapter.md`](./03-meta-sdk-adapter.md) | 2026-11-21 | Selesai & Teruji ✅ |
 | 04 | **Ads Insights Sync Engine** | [`04-ads-insights-sync.md`](./04-ads-insights-sync.md) | 2026-11-22 | Selesai & Teruji ✅ |
 | 05 | **Non-Additive Metrics & Queue Scheduler** | [`05-non-additive-and-queue.md`](./05-non-additive-and-queue.md) | 2026-11-22 | Selesai & Teruji ✅ |
+| 06 | **Repository Analitik & Ingest** | [`06-database-repositories-analytics.md`](./06-database-repositories-analytics.md) | 2026-11-21 | Selesai & Teruji ✅ |
