@@ -30,6 +30,13 @@ services:
       - OPEN_WA_URL=http://open_wa:2785
       - OPEN_WA_APP_KEY=${OPEN_WA_APP_KEY:-}
       - OPEN_WA_WEBHOOK_URL=${OPEN_WA_WEBHOOK_URL:-http://host.docker.internal:3000/api/wa/webhook}
+      - META_APP_ID=${META_APP_ID:-}
+      - META_APP_SECRET=${META_APP_SECRET:-}
+      - META_REDIRECT_URI=${META_REDIRECT_URI:-http://localhost:3000/api/meta/oauth/callback}
+      - META_API_VERSION=${META_API_VERSION:-v21.0}
+      - META_OAUTH_SCOPES=${META_OAUTH_SCOPES:-ads_read,ads_management}
+      - GEMINI_API_KEYS=${GEMINI_API_KEYS:-}
+      - GEMINI_MODEL=${GEMINI_MODEL:-gemini-2.5-flash}
     volumes:
       - ./log:/app/log
     depends_on:

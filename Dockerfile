@@ -3,13 +3,13 @@ WORKDIR /app
 
 FROM base AS install
 COPY package.json bun.lock ./
-RUN bun install --frozen-lockfile --production
+RUN bun install --frozen-lockfile
 
 FROM base AS release
 COPY --from=install /app/node_modules ./node_modules
 COPY . .
-RUN mkdir -p /app/log && chown -R bun:bun /app
+RUN chmod +x docker-entrypoint.sh && mkdir -p /app/log && chown -R bun:bun /app
 
 USER bun
 EXPOSE 3000
-ENTRYPOINT ["bun", "run", "src/index.ts"]
+ENTRYPOINT ["/app/docker-entrypoint.sh"]
