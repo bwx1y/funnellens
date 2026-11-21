@@ -39,6 +39,9 @@ export const AdInsightDailyEntity = pgTable("ad_insights_daily", {
     videoP75WatchedActions: bigint("video_p75_watched_actions", {mode: "number"}),
     videoP100WatchedActions: bigint("video_p100_watched_actions", {mode: "number"}),
     videoAvgTimeWatchedSeconds: numeric("video_avg_time_watched_seconds", {precision: 14, scale: 4}),
+    graphVersion: text("graph_version"),
+    actionReportTime: text("action_report_time").notNull().default("impression"),
+    video3SecWatchedActions: bigint("video_3_sec_watched_actions", {mode: "number"}),
     fetchedAt: timestamp("fetched_at", {withTimezone: true}).defaultNow().notNull(),
     isFinal: boolean("is_final").notNull().default(false),
 }, (t) => ({

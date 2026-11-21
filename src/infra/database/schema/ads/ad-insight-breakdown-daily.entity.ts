@@ -1,4 +1,4 @@
-import {bigint, bigserial, date, jsonb, pgTable, text, uniqueIndex} from "drizzle-orm/pg-core";
+import {bigint, bigserial, date, integer, jsonb, pgTable, text, uniqueIndex} from "drizzle-orm/pg-core";
 import {relations} from "drizzle-orm";
 import {AdAccountEntity} from "@db/schema/ads/ad-account.entity";
 import {CampaignEntity} from "@db/schema/ads/campaign.entity";
@@ -19,6 +19,7 @@ export const AdInsightBreakdownDailyEntity = pgTable("ad_insights_breakdown_dail
     publisherPlatform: text("publisher_platform"),
     platformPosition: text("platform_position"),
     impressionDevice: text("impression_device"),
+    hourOfDay: integer("hour_of_day"),
     age: text("age"),
     gender: text("gender"),
     country: text("country"),

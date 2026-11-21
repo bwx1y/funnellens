@@ -1,4 +1,4 @@
-import {bigint, bigserial, integer, jsonb, pgTable, text, timestamp, uniqueIndex, uuid, varchar} from "drizzle-orm/pg-core";
+import {bigint, bigserial, jsonb, pgTable, text, timestamp, uniqueIndex, uuid, varchar} from "drizzle-orm/pg-core";
 import {relations} from "drizzle-orm";
 import {AdAccountEntity} from "@db/schema/ads/ad-account.entity";
 import {WaPhoneEntity} from "@db/schema/wa/wa-phone.entity";
@@ -23,7 +23,7 @@ export const LeadEntity = pgTable("leads", {
     creativeId: text("creative_id").references(() => AdCreativeEntity.id),
     sourcePlatform: text("source_platform"),
     sourcePosition: text("source_position"),
-    score: integer("score"),
+    attributionNote: text("attribution_note"),
     temperature: leadTemperatureEnum("temperature"),
     stage: leadStageEnum("stage").notNull().default("CHAT_STARTED"),
     sentiment: text("sentiment"),

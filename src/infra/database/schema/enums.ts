@@ -28,7 +28,17 @@ export const leadStageEnum = pgEnum("lead_stage", [
     "CHAT_STARTED",
     "REPLIED",
     "QUALIFIED",
+    "CLOSING",
     "CLOSED",
+]);
+
+export const waChannelEnum = pgEnum("wa_channel", ["OPENWA", "CLOUD"]);
+
+export const explanationStateEnum = pgEnum("explanation_state", [
+    "PENDING",
+    "READY",
+    "FALLBACK",
+    "UNAVAILABLE",
 ]);
 
 export const messageDirectionEnum = pgEnum("message_direction", [

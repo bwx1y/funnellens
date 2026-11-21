@@ -1,4 +1,4 @@
-import {bigint, bigserial, pgTable, text, timestamp} from "drizzle-orm/pg-core";
+import {bigint, bigserial, date, pgTable, text, timestamp} from "drizzle-orm/pg-core";
 import {relations} from "drizzle-orm";
 import {AdAccountEntity} from "@db/schema/ads/ad-account.entity";
 import {syncRunStatusEnum} from "@db/schema/enums";
@@ -11,6 +11,8 @@ export const SyncRunEntity = pgTable("sync_runs", {
     finishedAt: timestamp("finished_at", {withTimezone: true}),
     status: syncRunStatusEnum("status").notNull().default("RUNNING"),
     rowsUpserted: bigint("rows_upserted", {mode: "number"}),
+    rangeSince: date("range_since"),
+    rangeUntil: date("range_until"),
     error: text("error"),
 });
 

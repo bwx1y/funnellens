@@ -11,6 +11,7 @@ export const AdSetEntity = pgTable("ad_sets", {
     status: text("status"),
     effectiveStatus: text("effective_status"),
     optimizationGoal: text("optimization_goal"),
+    objectiveGroup: text("objective_group"),
     billingEvent: text("billing_event"),
     bidStrategy: text("bid_strategy"),
     bidAmountMinor: bigint("bid_amount_minor", {mode: "number"}),

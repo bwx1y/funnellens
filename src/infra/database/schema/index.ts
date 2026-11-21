@@ -15,14 +15,19 @@ export * from "./ads/ad-insight-daily.entity";
 export * from "./ads/ad-set.entity";
 export * from "./ads/campaign.entity";
 export * from "./ads/creative-tag.entity";
+export * from "./ads/explanation.entity";
 export * from "./ads/insight-alert.entity";
+export * from "./ads/insight-sync-staging.entity";
 export * from "./ads/meta-connection.entity";
+export * from "./ads/pixel-source.entity";
 export * from "./ads/sync-run.entity";
 export * from "./ads/tracking-health-daily.entity";
 
 // WhatsApp
 export * from "./wa/conversation-message.entity";
 export * from "./wa/lead.entity";
+export * from "./wa/lead-assessment.entity";
+export * from "./wa/lead-milestone.entity";
 export * from "./wa/wa-message.entity";
 export * from "./wa/wa-phone.entity";
 export * from "./wa/wa-session.entity";
