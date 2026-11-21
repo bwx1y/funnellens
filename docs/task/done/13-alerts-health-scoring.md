@@ -81,7 +81,7 @@ Setiap baris membawa `evidence` (angka pemicu + `since`/`until`/`trackingState`)
 | `tests/unit/alerts-helpers.test.ts` | ambang `−5`/`−15`, tabel `LEAK_RULES`, `snoozedUntil` 24/168 jam |
 | `tests/unit/alerts-evaluate.test.ts` | `evaluate` dengan repository double: `deltaPp −10` → `WARNING` + `≈100 chat hilang`, HOT 31 menit → `CRITICAL` + `entityId`/`route`, HOT 10 menit tidak memicu, `tracking_emq` di ambang 6 / 0.85; worker lintas akun dan akun hilang |
 | `tests/integration/alerts.test.ts` | route nyata: snooze 24 jam (hilang dari `active`, muncul di `snoozed` dengan `snoozedUntil` ≈ +24 jam, badge 1 → 0), resolve (`resolvedAt` + `resolved_by = user.iss`, pindah ke `resolved`), akun/alert tenant lain → 404 dan baris tidak berubah |
-| `tests/integration/repositories.test.ts` | `findActiveByAccountId` + `snooze` |
+| `tests/integration/repositories.test.ts` | `findActiveByAccountId` + `snooze`; `resolveByRuleKey` dengan `keepEntityIds` menutup baris `cr_stale` dan membiarkan `cr_keep` `ACTIVE` |
 
 ## Keputusan & Catatan
 - **`active` = `ACTIVE` saja**: snooze yang kedaluwarsa tidak otomatis muncul di `active`; evaluasi per jam berikutnya membuka kembali (`upsert` → `ACTIVE`) atau menutupnya (`resolveByRuleKey`), sesuai definisi `active`/`snoozed`/`resolved` di TODO.
