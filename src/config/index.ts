@@ -41,7 +41,7 @@ export const Config = {
         appSecret: getEnv("META_APP_SECRET", "APP_SECRET"),
         apiVersion: getEnv("META_API_VERSION", "v21.0"),
         redirectUri: getEnv("META_REDIRECT_URI", "http://localhost:3000/api/meta/oauth/callback"),
-        scopes: getEnv("META_OAUTH_SCOPES", "ads_read,ads_management,business_management")
+        scopes: getEnv("META_OAUTH_SCOPES", "ads_read,ads_management")
             .split(",")
             .map((scope) => scope.trim())
             .filter(Boolean),
