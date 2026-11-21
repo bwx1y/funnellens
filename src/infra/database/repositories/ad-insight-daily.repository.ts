@@ -5,21 +5,6 @@ import {sql} from "drizzle-orm";
 
 export const ATTRIBUTION_WINDOW = "7d_click";
 
-// Precedence order: first non-null wins, so the same lead/purchase is never summed twice
-// (Meta returns several aliases for one conversion in the same insight row).
-export const LEAD_ACTION_PRECEDENCE = [
-    "onsite_conversion.messaging_conversation_started_7d",
-    "lead",
-    "onsite_conversion.lead_grouped",
-    "offsite_conversion.fb_pixel_lead",
-] as const;
-
-export const PURCHASE_ACTION_PRECEDENCE = [
-    "purchase",
-    "omni_purchase",
-    "offsite_conversion.fb_pixel_purchase",
-] as const;
-
 export type AdInsightDaily = typeof AdInsightDailyEntity.$inferSelect;
 export type InsertAdInsightDaily = typeof AdInsightDailyEntity.$inferInsert;
 
@@ -61,36 +46,6 @@ export interface CampaignPerformance {
 
 const CHUNK_SIZE = 500;
 const ACTION_CHUNK_SIZE = 1000;
-
-export const LEAD_COUNT_SQL = sql`coalesce(
-    max(a.count) filter (where a.action_type = 'onsite_conversion.messaging_conversation_started_7d'),
-    max(a.count) filter (where a.action_type = 'lead'),
-    max(a.count) filter (where a.action_type = 'onsite_conversion.lead_grouped'),
-    max(a.count) filter (where a.action_type = 'offsite_conversion.fb_pixel_lead'),
-    0
-)`;
-
-export const PURCHASE_VALUE_SQL = sql`coalesce(
-    max(a.value_minor) filter (where a.action_type = 'purchase'),
-    max(a.value_minor) filter (where a.action_type = 'omni_purchase'),
-    max(a.value_minor) filter (where a.action_type = 'offsite_conversion.fb_pixel_purchase'),
-    0
-)`;
-
-export const PURCHASE_COUNT_SQL = sql`coalesce(
-    max(a.count) filter (where a.action_type = 'purchase'),
-    max(a.count) filter (where a.action_type = 'omni_purchase'),
-    max(a.count) filter (where a.action_type = 'offsite_conversion.fb_pixel_purchase'),
-    0
-)`;
-
-const PER_INSIGHT_ACTIONS_SQL = sql`(
-    select a.insight_daily_id,
-           ${LEAD_COUNT_SQL} as leads,
-           ${PURCHASE_VALUE_SQL} as purchase_value_minor
-    from ad_insight_actions a
-    group by a.insight_daily_id
-)`;
 
 type InsightKeyFields = Pick<InsertAdInsightDaily, "level" | "entityId" | "date" | "attributionWindow">;
 
@@ -153,10 +108,9 @@ export class AdInsightDailyRepository extends DatabaseRepository {
                 coalesce(sum(i.impressions), 0)            as impressions,
                 coalesce(sum(i.clicks), 0)                 as clicks,
                 coalesce(sum(i.inline_link_clicks), 0)     as inline_link_clicks,
-                coalesce(sum(per.leads), 0)                as leads,
-                coalesce(sum(per.purchase_value_minor), 0) as purchase_value_minor
-            from ad_insights_daily i
-            left join ${PER_INSIGHT_ACTIONS_SQL} per on per.insight_daily_id = i.id
+                coalesce(sum(i.leads), 0)                  as leads,
+                coalesce(sum(i.purchase_value_minor), 0)   as purchase_value_minor
+            from ad_insight_metrics i
             where ${this.scopeFilter(accountId, since, until, campaignId)}
         `) as unknown as AggregatedKPIRow[];
 
@@ -180,9 +134,8 @@ export class AdInsightDailyRepository extends DatabaseRepository {
         const rows = await this.database.execute(sql`
             select i.date::text                       as date,
                    coalesce(sum(i.spend_minor), 0)    as spend_minor,
-                   coalesce(sum(per.leads), 0)        as leads
-            from ad_insights_daily i
-            left join ${PER_INSIGHT_ACTIONS_SQL} per on per.insight_daily_id = i.id
+                   coalesce(sum(i.leads), 0)          as leads
+            from ad_insight_metrics i
             where ${this.scopeFilter(accountId, since, until, campaignId)}
             group by i.date
             order by i.date asc
@@ -204,11 +157,10 @@ export class AdInsightDailyRepository extends DatabaseRepository {
             select i.campaign_id                           as campaign_id,
                    c.name                                  as campaign_name,
                    coalesce(sum(i.spend_minor), 0)            as spend_minor,
-                   coalesce(sum(per.leads), 0)                as leads,
-                   coalesce(sum(per.purchase_value_minor), 0) as purchase_value_minor
-            from ad_insights_daily i
+                   coalesce(sum(i.leads), 0)                  as leads,
+                   coalesce(sum(i.purchase_value_minor), 0)   as purchase_value_minor
+            from ad_insight_metrics i
             join campaigns c on c.id = i.campaign_id
-            left join ${PER_INSIGHT_ACTIONS_SQL} per on per.insight_daily_id = i.id
             where ${this.scopeFilter(accountId, since, until)}
             group by i.campaign_id, c.name
             order by spend_minor desc

@@ -120,6 +120,13 @@
       "when": 1795264469379,
       "tag": "0016_schema_sync_analytics",
       "breakpoints": true
+    },
+    {
+      "idx": 17,
+      "version": "7",
+      "when": 1795265245500,
+      "tag": "0017_insight_metrics_view",
+      "breakpoints": true
     }
   ]
 }

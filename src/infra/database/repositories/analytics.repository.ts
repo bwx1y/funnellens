@@ -1,12 +1,7 @@
 import {DatabaseRepository} from "./base.repository";
 import {PixelSourceEntity} from "@db/schema/ads/pixel-source.entity";
 import {eq, sql} from "drizzle-orm";
-import {
-    ATTRIBUTION_WINDOW,
-    LEAD_COUNT_SQL,
-    PURCHASE_COUNT_SQL,
-    PURCHASE_VALUE_SQL,
-} from "./ad-insight-daily.repository";
+import {ATTRIBUTION_WINDOW} from "./ad-insight-daily.repository";
 
 export interface FunnelCounts {
     impressions: number;
@@ -78,35 +73,6 @@ export interface TrackingSummary {
     overdue: boolean;
     pixelSources: (typeof PixelSourceEntity.$inferSelect)[];
 }
-
-const LPV_COUNT_SQL = sql`coalesce(max(a.count) filter (where a.action_type = 'landing_page_view'), 0)`;
-
-const VIEW_CONTENT_COUNT_SQL = sql`coalesce(
-    max(a.count) filter (where a.action_type = 'view_content'),
-    max(a.count) filter (where a.action_type = 'offsite_conversion.fb_pixel_view_content'),
-    0
-)`;
-
-const ADD_TO_CART_COUNT_SQL = sql`coalesce(
-    max(a.count) filter (where a.action_type = 'add_to_cart'),
-    max(a.count) filter (where a.action_type = 'offsite_conversion.fb_pixel_add_to_cart'),
-    0
-)`;
-
-const ANALYTICS_ACTIONS_SQL = sql`(
-    select a.insight_daily_id,
-           ${LEAD_COUNT_SQL} as leads,
-           ${PURCHASE_COUNT_SQL} as purchases,
-           ${PURCHASE_VALUE_SQL} as purchase_value_minor,
-           ${LPV_COUNT_SQL} as lpv,
-           ${VIEW_CONTENT_COUNT_SQL} as view_content,
-           ${ADD_TO_CART_COUNT_SQL} as add_to_cart
-    from ad_insight_actions a
-    group by a.insight_daily_id
-)`;
-
-// `wa` counts conversations, `web` counts purchases: one conversion per objective group, never both.
-const RESULTS_SQL = sql`case when coalesce(s.objective_group, 'web') = 'wa' then per.leads else per.purchases end`;
 
 interface FunnelRow {
     impressions: string;
@@ -201,15 +167,13 @@ export class AnalyticsRepository extends DatabaseRepository {
             select
                 coalesce(sum(i.impressions), 0)            as impressions,
                 coalesce(sum(i.inline_link_clicks), 0)     as link_clicks,
-                coalesce(sum(per.lpv), 0)                  as lpv,
-                coalesce(sum(per.view_content), 0)         as view_content,
-                coalesce(sum(per.add_to_cart), 0)          as add_to_cart,
-                coalesce(sum(per.purchases), 0)            as purchase,
-                coalesce(sum(per.leads), 0)                as messaging_started,
-                coalesce(sum(per.purchase_value_minor), 0) as purchase_value_minor
-            from ad_insights_daily i
-            left join ${ANALYTICS_ACTIONS_SQL} per on per.insight_daily_id = i.id
-            left join ad_sets s on s.id = i.adset_id
+                coalesce(sum(i.lpv), 0)                    as lpv,
+                coalesce(sum(i.view_content), 0)           as view_content,
+                coalesce(sum(i.add_to_cart), 0)            as add_to_cart,
+                coalesce(sum(i.purchases), 0)              as purchase,
+                coalesce(sum(i.leads), 0)                  as messaging_started,
+                coalesce(sum(i.purchase_value_minor), 0)   as purchase_value_minor
+            from ad_insight_metrics i
             where ${this.insightScope(accountId, since, until, {campaignId, objectiveGroup})}
         `) as unknown as FunnelRow[];
 
@@ -296,21 +260,19 @@ export class AnalyticsRepository extends DatabaseRepository {
         campaignId?: string
     ): Promise<CreativeAggregate[]> {
         const rows = await this.database.execute(sql`
-            select ad.creative_id                          as creative_id,
-                   coalesce(s.objective_group, 'web')      as objective_group,
-                   coalesce(sum(i.spend_minor), 0)         as spend_minor,
-                   coalesce(sum(i.impressions), 0)         as impressions,
-                   coalesce(sum(i.inline_link_clicks), 0)  as link_clicks,
-                   coalesce(sum(${RESULTS_SQL}), 0)        as results,
-                   coalesce(sum(per.purchase_value_minor), 0) as purchase_value_minor,
-                   coalesce(sum(i.reach), 0)               as reach,
-                   min(i.date)::text                       as first_seen
-            from ad_insights_daily i
+            select ad.creative_id                           as creative_id,
+                   i.objective_group                        as objective_group,
+                   coalesce(sum(i.spend_minor), 0)          as spend_minor,
+                   coalesce(sum(i.impressions), 0)          as impressions,
+                   coalesce(sum(i.inline_link_clicks), 0)   as link_clicks,
+                   coalesce(sum(i.results), 0)              as results,
+                   coalesce(sum(i.purchase_value_minor), 0) as purchase_value_minor,
+                   coalesce(sum(i.reach), 0)                as reach,
+                   min(i.date)::text                        as first_seen
+            from ad_insight_metrics i
             join ads ad on ad.id = i.ad_id
-            left join ad_sets s on s.id = ad.adset_id
-            left join ${ANALYTICS_ACTIONS_SQL} per on per.insight_daily_id = i.id
             where ${this.insightScope(accountId, since, until, {campaignId})}
-            group by ad.creative_id, coalesce(s.objective_group, 'web')
+            group by ad.creative_id, i.objective_group
             order by spend_minor desc
         `) as unknown as CreativeAggregateRow[];
 
@@ -344,11 +306,9 @@ export class AnalyticsRepository extends DatabaseRepository {
                    coalesce(sum(i.impressions), 0)   as impressions,
                    coalesce(sum(i.clicks), 0)        as clicks,
                    coalesce(sum(i.reach), 0)         as reach,
-                   coalesce(sum(${RESULTS_SQL}), 0)  as results
-            from ad_insights_daily i
+                   coalesce(sum(i.results), 0)       as results
+            from ad_insight_metrics i
             join ads ad on ad.id = i.ad_id
-            left join ad_sets s on s.id = ad.adset_id
-            left join ${ANALYTICS_ACTIONS_SQL} per on per.insight_daily_id = i.id
             where ${this.insightScope(accountId, since, until)}
               and ad.creative_id = ${creativeId}
             group by i.date
@@ -385,11 +345,9 @@ export class AnalyticsRepository extends DatabaseRepository {
             with perf as (
                 select ad.creative_id                   as creative_id,
                        coalesce(sum(i.spend_minor), 0)  as spend_minor,
-                       coalesce(sum(${RESULTS_SQL}), 0) as results
-                from ad_insights_daily i
+                       coalesce(sum(i.results), 0)      as results
+                from ad_insight_metrics i
                 join ads ad on ad.id = i.ad_id
-                left join ad_sets s on s.id = ad.adset_id
-                left join ${ANALYTICS_ACTIONS_SQL} per on per.insight_daily_id = i.id
                 where ${this.insightScope(accountId, since, until)}
                 group by ad.creative_id
             ),
@@ -436,12 +394,10 @@ export class AnalyticsRepository extends DatabaseRepository {
                    coalesce(sum(i.impressions), 0)   as impressions,
                    coalesce(sum(i.clicks), 0)        as clicks,
                    coalesce(sum(i.spend_minor), 0)   as spend_minor,
-                   coalesce(sum(${RESULTS_SQL}), 0)  as results
+                   coalesce(sum(i.results), 0)       as results
             from creative_tags t
             join ads ad on ad.creative_id = t.creative_id
-            join ad_insights_daily i on i.ad_id = ad.id
-            left join ad_sets s on s.id = ad.adset_id
-            left join ${ANALYTICS_ACTIONS_SQL} per on per.insight_daily_id = i.id
+            join ad_insight_metrics i on i.ad_id = ad.id
             where t.tag_type = ${tagType}
               and ${this.insightScope(accountId, since, until)}
             group by t.tag_value, ad.creative_id
@@ -544,6 +500,6 @@ export class AnalyticsRepository extends DatabaseRepository {
             and i.date >= ${this.toDateString(since)}
             and i.date <= ${this.toDateString(until)}
             ${campaignId === undefined ? sql`` : sql`and i.campaign_id = ${campaignId}`}
-            ${objectiveGroup === undefined ? sql`` : sql`and coalesce(s.objective_group, 'web') = ${objectiveGroup}`}`;
+            ${objectiveGroup === undefined ? sql`` : sql`and i.objective_group = ${objectiveGroup}`}`;
     }
 }
