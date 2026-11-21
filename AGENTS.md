@@ -89,6 +89,8 @@ HTTP Request
 - **Route Smoke Testing**: Test Elysia endpoints directly via `app.handle(new Request(...))` without spinning up a live network port.
 
 ## Git Commit Rules
+- **Commit after every finished task**: once a task's changes are verified (typecheck + relevant tests), commit them before reporting done. Never leave a verified task uncommitted.
+- Commit only the files changed by the task; never `git add -A` or stage unrelated work-in-progress.
 - When creating git commits, NEVER add `Co-Authored-By` trailers or mention OpenCode/AI in the commit message.
 - Do NOT override `user.name` or `user.email` in git config or via `-c` flags.
 - Group changes logically by feature and create separate commits for each feature.
