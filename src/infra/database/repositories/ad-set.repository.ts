@@ -1,32 +1,35 @@
 import {DatabaseRepository} from "./base.repository";
 import {AdSetEntity} from "@db/schema/ads/ad-set.entity";
-import {eq} from "drizzle-orm";
+import {eq, sql} from "drizzle-orm";
 
 export class AdSetRepository extends DatabaseRepository {
     async upsertBatch(adSets: (typeof AdSetEntity.$inferInsert)[]): Promise<void> {
         if (adSets.length === 0) return;
 
+        // `set` entries must reference `excluded.*`: a column reference renders as `"col" = "ad_sets"."col"`,
+        // which is a no-op on conflict and would never refresh existing rows.
         await this.database.insert(AdSetEntity)
             .values(adSets)
             .onConflictDoUpdate({
                 target: AdSetEntity.id,
                 set: {
-                    name: AdSetEntity.name,
-                    campaignId: AdSetEntity.campaignId,
-                    status: AdSetEntity.status,
-                    effectiveStatus: AdSetEntity.effectiveStatus,
-                    optimizationGoal: AdSetEntity.optimizationGoal,
-                    billingEvent: AdSetEntity.billingEvent,
-                    bidStrategy: AdSetEntity.bidStrategy,
-                    bidAmountMinor: AdSetEntity.bidAmountMinor,
-                    dailyBudgetMinor: AdSetEntity.dailyBudgetMinor,
-                    lifetimeBudgetMinor: AdSetEntity.lifetimeBudgetMinor,
-                    targeting: AdSetEntity.targeting,
-                    startTime: AdSetEntity.startTime,
-                    endTime: AdSetEntity.endTime,
-                    createdTime: AdSetEntity.createdTime,
-                    updatedTime: AdSetEntity.updatedTime,
-                    raw: AdSetEntity.raw,
+                    name: sql`excluded.name`,
+                    campaignId: sql`excluded.campaign_id`,
+                    status: sql`excluded.status`,
+                    effectiveStatus: sql`excluded.effective_status`,
+                    optimizationGoal: sql`excluded.optimization_goal`,
+                    objectiveGroup: sql`excluded.objective_group`,
+                    billingEvent: sql`excluded.billing_event`,
+                    bidStrategy: sql`excluded.bid_strategy`,
+                    bidAmountMinor: sql`excluded.bid_amount_minor`,
+                    dailyBudgetMinor: sql`excluded.daily_budget_minor`,
+                    lifetimeBudgetMinor: sql`excluded.lifetime_budget_minor`,
+                    targeting: sql`excluded.targeting`,
+                    startTime: sql`excluded.start_time`,
+                    endTime: sql`excluded.end_time`,
+                    createdTime: sql`excluded.created_time`,
+                    updatedTime: sql`excluded.updated_time`,
+                    raw: sql`excluded.raw`,
                 },
             });
     }

@@ -3,25 +3,20 @@ import {SyncRunEntity} from "@db/schema/ads/sync-run.entity";
 import {and, desc, eq} from "drizzle-orm";
 
 export class SyncRunRepository extends DatabaseRepository {
-    async start(accountId: string, resource: string = "master"): Promise<typeof SyncRunEntity.$inferSelect> {
+    async create(run: typeof SyncRunEntity.$inferInsert): Promise<typeof SyncRunEntity.$inferSelect> {
         const [entity] = await this.database.insert(SyncRunEntity)
-            .values({
-                accountId,
-                resource,
-                status: "RUNNING",
-                startedAt: new Date(),
-            })
+            .values(run)
             .returning();
 
         return entity;
     }
 
-    async finish(id: number, rowsUpserted: number): Promise<void> {
+    async complete(id: number, rowsSynced: number): Promise<void> {
         await this.database.update(SyncRunEntity)
             .set({
                 status: "SUCCESS",
                 finishedAt: new Date(),
-                rowsUpserted,
+                rowsUpserted: rowsSynced,
             })
             .where(eq(SyncRunEntity.id, id));
     }

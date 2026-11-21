@@ -1,6 +1,6 @@
 import {DatabaseRepository} from "./base.repository";
 import {CampaignEntity} from "@db/schema/ads/campaign.entity";
-import {eq} from "drizzle-orm";
+import {and, eq} from "drizzle-orm";
 
 export class CampaignRepository extends DatabaseRepository {
     async upsertBatch(campaigns: (typeof CampaignEntity.$inferInsert)[]): Promise<void> {
@@ -28,10 +28,15 @@ export class CampaignRepository extends DatabaseRepository {
             });
     }
 
-    async findByAccountId(accountId: string): Promise<(typeof CampaignEntity.$inferSelect)[]> {
+    async findByAccountId(accountId: string, status?: string): Promise<(typeof CampaignEntity.$inferSelect)[]> {
+        const conditions = [eq(CampaignEntity.accountId, accountId)];
+        if (status !== undefined) {
+            conditions.push(eq(CampaignEntity.status, status));
+        }
+
         return this.database.select()
             .from(CampaignEntity)
-            .where(eq(CampaignEntity.accountId, accountId))
+            .where(and(...conditions))
             .orderBy(CampaignEntity.name);
     }
 }
