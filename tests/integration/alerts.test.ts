@@ -204,6 +204,13 @@ describe("Alerts management API", () => {
         expect(active.alerts.map((alert) => alert.id)).toEqual([expired.id]);
         expect((await list("snoozed")).alerts).toEqual([]);
         expect((await list("resolved")).alerts.map((alert) => alert.id)).toEqual([alertId]);
+    it("returns 404 for another tenant's account and alert", async () => {
+        const forbiddenList = await app.handle(new Request(
+            `http://localhost/api/alerts?accountId=${otherAccountId}`,
+            {headers}
+        ));
+        expect(forbiddenList.status).toBe(404);
+        expect(await forbiddenList.json()).toEqual({status: false, message: "Akun iklan tidak ditemukan"});
 
         await db.delete(InsightAlertEntity).where(eq(InsightAlertEntity.id, expired.id));
     });
