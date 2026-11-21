@@ -1,39 +1,34 @@
 # TODO: Tracking Health & CAPI Monitoring
 
 ## Gambaran Fitur
-Endpoint dan service untuk memantau kesehatan infrastruktur tracking iklan: konektivitas Meta Pixel, Conversions API (CAPI), Event Match Quality (EMQ), rasio deduplikasi, serta volume event browser vs server.
+Endpoint dan service untuk memantau kesehatan infrastruktur tracking iklan: konektivitas Meta Pixel, Conversions API (CAPI), Event Match Quality (EMQ), rasio deduplikasi, serta volume event browser vs server. Satu-satunya penulis tabel adalah job `sync-pixel-stats`.
 
 ## Daftar Pekerjaan
 
-### 1. Status Koneksi Tracking
-- [ ] Endpoint `GET /api/tracking-health`:
-  - Query parameters: `accountId`.
-- [ ] Kartu Status Infrastruktur:
-  - **Status Meta Pixel**:
-    - Status koneksi ("Terhubung" / "Terputus").
-    - Persentase event diterima browser (misal 98,4%).
-    - Waktu sinyal terakhir diterima (`last_seen_at`, misal "4 menit lalu").
-  - **Status Conversions API (CAPI)**:
-    - Status koneksi server-side ("Terhubung" / "Belum Terkonfigurasi").
-    - Rasio deduplikasi event server & browser (target > 90%).
-  - **Skor Kualitas Pencocokan (Event Match Quality / EMQ)**:
-    - Nilai rata-rata EMQ skala 0–10 (misal 5.8/10) pada event kunci (`Lead` atau `Purchase`).
-    - Peringatan jika nilai EMQ di bawah ambang batas rekomendasi (misal < 6.0).
+### 1. Penyimpanan
+- [ ] Tabel `pixel_sources`: `accountId`, `pixelId`, `name`, `capiConfigured`, `lastEventAt`, `emqAvg`, `lastSyncedAt`, `raw`; unik pada `(account_id, pixel_id)`.
+- [ ] `tracking_health_daily` (sudah ada): satu baris per `(account_id, date, event_name)`.
+- [ ] Job `sync-pixel-stats` (queue `meta-sync`, harian) sebagai **satu-satunya penulis** kedua tabel:
+  - `GET /act_{id}/adspixels` untuk daftar pixel.
+  - `GET /{pixel_id}/stats` untuk hitungan event.
+  - `dedupRate = 1 - duplicateCount / (browserCount + serverCount)`; `null` bila `duplicateCount` tidak tersedia.
+  - `matchQuality` dari EMQ payload.
+  - `status` per event: `Sehat` / `Perlu optimalisasi` / `Bermasalah`.
 
-### 2. Tabel Rincian Event Tracking (Events Table)
-- [ ] Data rincian per jenis event standar:
-  - Event kunci: `PageView`, `ViewContent`, `Lead`, `Purchase`, `AddToCart`, `InitiateCheckout`.
-  - Kolom metrik per event:
-    1. **Browser Count**: jumlah event yang terekam dari sisi klien (Pixel).
-    2. **Server Count**: jumlah event yang terekam dari sisi server (CAPI).
-    3. **Deduplication Rate (%)**: persentase event duplikat yang berhasil digabungkan menggunakan `event_id`.
-    4. **Match Quality Score**: skor kecocokan parameter pengguna (email hash, phone hash, fbp, fbc).
-    5. **Status Kesehatan**: "Sehat", "Perlu Optimalisasi", atau "Bermasalah".
+### 2. Endpoint
+- [ ] `GET /api/tracking-health` (`accountId`), memakai `JwtUtil.isAuthenticated` + `requireAccountScope`.
+- [ ] Kartu infrastruktur:
+  - **Meta Pixel**: terhubung/terputus, porsi event dari browser, `last_seen_at`.
+  - **CAPI**: terhubung/belum terkonfigurasi, rasio deduplikasi (target > 90%).
+  - **EMQ**: rata-rata skala 0–10 untuk event kunci (`Lead`, `Purchase`), peringatan bila < 6,0.
+- [ ] Tabel event: `PageView`, `ViewContent`, `Lead`, `Purchase`, `AddToCart`, `InitiateCheckout` dengan `browserCount`, `serverCount`, `dedupRate`, `matchQuality`, `status`.
+- [ ] Bila `GET /{pixel_id}/stats` mengembalikan 403 atau kosong: `pixel_sources.capiConfigured = false`, tabel event kosong, dan respons memuat `note: "Statistik event tidak tersedia untuk akun ini."` — tidak ada angka karangan.
+- [ ] Setiap nilai `null` disertai `note`.
 
-### 3. Sinkronisasi Data Events Manager / CAPI Diagnostics
-- [ ] Integrasikan pembacaan statistik event dari Graph API:
-  - Request edge `GET /{pixel_id}/stats` atau query diagnostic CAPI.
-- [ ] Penyimpanan snapshot berkala ke tabel `tracking_health_daily`:
-  - Fields: `pixel_id`, `date`, `event_name`, `browser_count`, `server_count`, `deduplication_rate`, `match_quality_score`, `status`.
-- [ ] Rekomendasi Perbaikan Parameter:
-  - Generate peringatan jika event `Lead` tidak menyertakan hash nomor telepon (`ph`) atau email (`em`).
+### 3. Rekomendasi Parameter
+- [ ] Peringatan bila event `Lead` tidak menyertakan hash nomor telepon (`ph`) atau email (`em`), ditulis sebagai `nextCheck`, tanpa klaim penyebab.
+
+## Uji Selesai
+- Akun tanpa pixel → kartu Pixel/CAPI `null` dengan `note`, tabel event kosong, tidak ada `0` pengganti.
+- `dedupRate` untuk `browserCount 100` + `serverCount 80` + `duplicateCount 60` → `1 - 60/180 = 0.6667`.
+- EMQ `5.8` memicu status `Perlu optimalisasi` dan alert `tracking_emq`.

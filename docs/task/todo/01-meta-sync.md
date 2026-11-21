@@ -55,3 +55,11 @@ Integrasi ke Meta Marketing API (`facebook-nodejs-business-sdk`) untuk sinkronis
 - [x] Rate-limit handling & backoff:
   - Baca header `X-Business-Use-Case-Usage` dan `X-Ad-Account-Usage`.
   - Terapkan exponential backoff pada error 429 / transient rate-limit.
+
+### 6. Kelengkapan F1
+- [x] `action_report_time` masuk daftar `fields` insight dan disimpan sebagai `ad_insights_daily.action_report_time` (default `"impression"`).
+- [x] `graphVersion` (`Config.meta.apiVersion`) disimpan di setiap baris insight.
+- [x] `objectiveGroup` (`wa`/`web`) dihitung saat sync master ad set: `destination_type ∈ {WHATSAPP, MESSENGER}` atau `optimization_goal = "CONVERSATIONS"` → `wa`; selain itu `web`.
+- [x] Insight ditulis ke `insight_sync_staging` lalu diterbitkan atomik lewat `publishCompleteSlice` (hapus slice lama → insert → hapus staging → `sync_runs` SUCCESS dengan `range_since`/`range_until`).
+- [x] Job `sync-hourly-breakdowns` (rentang default 7 hari terakhir) memakai breakdown `hourly_stats_aggregated_by_advertiser_time_zone` sebagai panggilan terpisah; `hourOfDay` masuk `breakdownHash` (`pub|pos|device|hour`).
+- [x] `video_3_sec_watched_actions` disimpan ke `ad_insights_daily.video_3_sec_watched_actions`.

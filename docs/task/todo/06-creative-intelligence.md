@@ -1,46 +1,64 @@
 # TODO: Creative Intelligence & Fatigue Detection
 
 ## Gambaran Fitur
-Endpoint dan service untuk mengevaluasi efektivitas materi iklan (kreatif video & gambar), perhitungan skor performa, hook rate, hold rate, deteksi kejenuhan iklan (ad fatigue), dan metadata tag kreatif.
+Endpoint dan service untuk menilai kreatif lewat empat dimensi bergerbang, mendeteksi kejenuhan dengan faktor pengganggu, mencari pola atribut kreatif, menghubungkan biaya iklan dengan mutu lead, membandingkan kreatif per tujuan, dan membaca hasil studi A/B Meta.
 
 ## Daftar Pekerjaan
 
-### 1. Creative Performance Ranking & List
-- [ ] Endpoint `GET /api/analytics/creatives`:
-  - Query parameters: `accountId`, `since`, `until`, `campaignId`, `format`, `status`, `sortBy`.
-- [ ] Kalkulasi metrik performa kreatif:
-  - **Belanja (`spend`)**: akumulasi biaya per materi kreatif.
-  - **Hasil (`results` / `leads`)**: jumlah pesan dimulai atau formulir lead per materi iklan.
-  - **Biaya per Hasil (`cost_per_result`)**: `spend / results`.
-  - **CTR (`ctr`)**: `clicks / impressions * 100`.
-  - **ROAS (`roas`)**: `purchase_value / spend`.
-  - **Skor Performa Kreatif (`creative_score` 0–100)**:
-    - Rumus gabungan bobot dari CTR relatif, Hook Rate, Hold Rate, dan Cost per Result.
-- [ ] Status / Badge Kreatif:
-  - Klasifikasi status performa ("Juara / Winner", "Stabil", "Perlu Uji", "Kelelahan / Fatigued").
+### 1. Peringkat Kreatif & Empat Dimensi
+- [ ] Endpoint `GET /api/analytics/creatives` (`accountId`, `since`, `until`, `campaignId`, `sortBy`).
+- [ ] Agregasi per `creativeId` + `objectiveGroup` (satu kreatif dipakai beberapa ad tetap satu baris): `spendMinor`, `results`, `costPerResultMinor`, `ctr` (total klik / total tayangan), `roas`, `frequency`, tanggal tayang pertama teramati.
+- [ ] Empat dimensi, masing-masing `{label: "kuat"|"rata-rata"|"lemah"|null, certainty: "kurang"|"indikatif"|"terukur"}`:
+  - **Biaya**: persentil biaya/hasil, arah dibalik (lebih rendah lebih baik). Gerbang 15 hasil (indikatif) dan 50 hasil (terukur).
+  - **Perhatian**: persentil CTR. Gerbang 3.000 tayangan (indikatif) dan 5.000 (terukur).
+  - **Kualitas**: persentil Hot rate (WA) atau konversi (web). Gerbang 10 lead matang (indikatif) dan 20 (terukur).
+  - **Kesehatan**: umur setelah matang + tren. Gerbang 7 hari (indikatif) dan 14 hari (terukur).
+- [ ] Persentil hanya dihitung bila ada ≥ 5 pembanding; kurang dari itu `label: null`, `certainty: "kurang"`.
+- [ ] Status dari `overall(cost, attention, quality, health, mature, fatigued, allocationLimited)` → `Belum cukup data` / `Pantau` / `Winner` / `Pertimbangkan dihentikan`. Tidak ada skor gabungan kreatif.
+- [ ] `allocationLimited` = ad set penerima kreatif punya `daily_budget_minor` < 3× biaya harian kreatif, atau `effective_status` bukan `ACTIVE`.
 
-### 2. Metrik Video Kritis (Hook Rate & Hold Rate)
-- [ ] Kalkulasi **Hook Rate** (persentase audiens yang bertahan menonton di detik awal):
-  - Rumus standar: `(video_3_sec_watched_actions / impressions) * 100` (atau fallback `video_play_actions / impressions * 100` jika 3-sec tidak tersedia).
-- [ ] Kalkulasi **Hold Rate** (daya tahan penonton hingga materi pesan tersampaikan):
-  - Rumus standar: `(video_thruplay_watched_actions / video_3_sec_watched_actions) * 100`.
-- [ ] Drop-off Durasi Video:
-  - Visualisasi persentase penonton pada p25, p50, p75, dan p100 (`video_p25_watched_actions` s/d `video_p100_watched_actions`).
+### 2. Detail Kreatif
+- [ ] Endpoint `GET /api/analytics/creatives/:id`: thumbnail, durasi video, judul, body, CTA, `daily[]` (spend, ctr, cpm, cpr, frequency), empat dimensi, `sample`, dan `note` bila gerbang belum lolos.
+- [ ] Metrik tampilan video (tidak memengaruhi status): `video: {hookRate, holdRate, retention:{p25,p50,p75,p100}}`; `hookRate = video_3_sec_watched_actions / impressions`, `holdRate = video_thruplay_watched_actions / video_3_sec_watched_actions`; `null` + `note` bila pembilang atau penyebut kosong.
 
-### 3. Deteksi Kejenuhan Iklan (Ad Fatigue Detection)
-- [ ] Endpoint `GET /api/analytics/creatives/fatigue`:
-  - Query parameters: `accountId`, `since`, `until`.
-- [ ] Rule Engine Deteksi Fatigue:
-  - Evaluasi kenaikan frekuensi penayangan: `frequency > 3.0` atau `frequency > 4.0`.
-  - Evaluasi tren CTR harian: penurunan CTR signifikan (> 25% drop dalam 7 hari terakhir).
-  - Evaluasi tren CPM: lonjakan biaya impresi CPM (> 30% naik).
-- [ ] Tindakan Rekomendasi (Actionable Next Steps):
-  - Rekomendasi pergantian hook pembuka, rotasi audiens baru, atau penggantian format kreatif.
+### 3. Kejenuhan
+- [ ] Endpoint `GET /api/analytics/creatives/fatigue` (`accountId`, `since`, `until`).
+- [ ] Baseline = 7 hari pertama setelah tayangan pertama teramati (CTR, frekuensi, CPR).
+- [ ] `fatigue(base, now, consecutiveDays, complete, confounded)`:
+  - `!complete` atau `base.ctr ≤ 0` → `Belum cukup data`.
+  - Drop < 15% atau frekuensi tidak naik → `Sehat`.
+  - `confounded` (CPM kini lebih murah) → `Perlu ditinjau`.
+  - Drop ≥ 25% dan CPR naik dan `consecutiveDays ≥ 3` → `Jenuh`.
+  - Selain itu → `Waspada`.
+- [ ] `complete` = tidak ada hari hilang dalam jendela; `consecutiveDays` dihitung dari `getCreativeDaily`.
+- [ ] Respons `{status, drop, frequency, base, now, confounded, note}`; tidak ada daftar rekomendasi naratif, hanya `nextCheck`.
 
-### 4. Detail Kreatif (Creative Drawer) & Tagging
-- [ ] Endpoint `GET /api/analytics/creatives/:id`:
-  - Data detail: URL thumbnail/preview, durasi video (detik & format mm:ss), judul, teks materi (`body`), CTA (`call_to_action_type`).
-  - Riwayat metrik harian kreatif tersebut (grafik spend, ctr, cpm harian).
-- [ ] Sistem Tagging Kreatif (`creative_tags`):
-  - Endpoint `POST /api/analytics/creatives/:id/tags`: tambah/hapus tag format, gaya pembuka (hook type), tone bahasa, tema produk.
-  - Tagging otomatis via LLM/Gemini adapter atau penandaan manual.
+### 4. Pola Kreatif
+- [ ] Endpoint `GET /api/analytics/creatives/patterns` (`accountId`, `since`, `until`).
+- [ ] Atribut dari `creative_tags` tipe `hook_type`, `format`, `tone`, `product_theme`.
+- [ ] `costPattern(withAttr, withoutAttr)` → `insufficient_sample` bila total < 8 kreatif atau salah satu sisi < 3; selain itu median per sisi, `pValue` (Mann-Whitney U), dan signifikansi setelah Benjamini-Hochberg (`q = 0.1`).
+- [ ] Tiga keadaan keluaran: `insufficient_sample`, `no_clear_pattern`, `eligible_for_test`.
+
+### 5. Kualitas Lead per Kreatif
+- [ ] Endpoint `GET /api/analytics/creatives/lead-quality` (`accountId`, `since`, `until`).
+- [ ] Belanja dan hasil diagregasi **per kreatif dulu** (subquery), baru join ringkasan lead agar penambahan baris chat tidak menggandakan belanja.
+- [ ] Baris: `{creativeId, costPerConversationMinor, hotLeads, assessedMatureLeads, hotRate, completeness, messageEvidence:{present, assessed, expected:7}, sample}`.
+- [ ] `hotRate = null` bila `assessedMatureLeads < 10`.
+- [ ] Tujuh elemen konten (`penawaran`, `produk_manfaat`, `harga`, `cta`, `target`, `kredibilitas`, `urgensi`) masing-masing berstatus `hadir`/`absen`/`tak_teramati`; `completeness = null` bila ada elemen `tak_teramati`, selain itu `present / 7`.
+
+### 6. Perbandingan & Eksperimen
+- [ ] `POST /api/analytics/creatives/comparisons` body `{accountId, snapshotId, creativeIds[]}`: dedupe ID, verifikasi semua ID milik tenant+akun dan punya baris insight pada snapshot; gagal → `BadRequestError("Pilihan kreatif tidak tersedia pada snapshot ini")`; hasil `[{goal:"wa"|"web", items, canCompare, evidenceType:"observational", snapshotId}]`.
+- [ ] `GET /api/analytics/creatives/experiments`: Graph `GET /{metaUserId}/ad_studies` memakai token `meta_connection`; `experimentState(hasAccess, studyCount, hasResult)` → `permission_missing` / `no_studies` / `results_pending` / `results_available`. Kegagalan izin Graph → `permission_missing`, bukan 500.
+- [ ] Tidak ada pemenang diumumkan lintas tujuan.
+
+### 7. Tagging
+- [ ] `POST /api/analytics/creatives/:id/tags` dan `DELETE /api/analytics/creatives/:id/tags/:tagId`.
+- [ ] `tagType ∈ {hook_type, format, tone, product_theme}`; `source` `manual` atau `ai`.
+- [ ] Job `creative-tagging` (jobId `tag:${creativeId}`) memakai `GeminiAdapter.generateObject` untuk empat `tagType` beserta `confidence`, `source: "ai"`.
+
+## Uji Selesai
+- Satu kreatif dipakai tiga ad dengan tujuan sama → satu baris; CTR = total klik / total tayangan.
+- Kreatif dengan 14 hasil → dimensi biaya `certainty: "indikatif"` dan status `Pantau`.
+- CTR 2,7% → 1,9%, frekuensi dan CPR naik, tiga hari, tanpa pengganggu → `Jenuh`.
+- Dua kreatif ber-hook → `insufficient_sample`.
+- Memilih satu kreatif WA dan satu web menghasilkan dua tab berisi satu baris; dua dari tujuan yang sama membuka `canCompare: true` tanpa mengubah persentil akun.

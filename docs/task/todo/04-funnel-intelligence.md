@@ -1,51 +1,46 @@
 # TODO: Funnel Intelligence & Leakage Detection
 
 ## Gambaran Fitur
-Endpoint dan service untuk visualisasi 6-stage funnel multi-kanal (Website & WhatsApp), deteksi kebocoran konversi (leakage), estimasi kerugian nominal Rupiah, serta detail tren tiap stage.
+Endpoint dan service untuk visualisasi tahap funnel per kanal (WhatsApp & Website), perbandingan dua periode, deteksi transisi yang menurun, dan detail tren tiap tahap. Tidak ada perhitungan kerugian dalam uang dan tidak ada klaim penyebab.
 
 ## Daftar Pekerjaan
 
-### 1. 6-Stage Multi-Channel Funnel
+### 1. Tahap Funnel Per Kanal
 - [ ] Endpoint `GET /api/analytics/funnel`:
-  - Query parameters: `accountId`, `since`, `until`, `campaignId`, `objective` (`website` | `whatsapp`).
-- [ ] Kalkulasi metrik 6 tahapan funnel:
-  1. **Impresi (`impressions`)**: `SUM(impressions)` dari Ads Insights.
-  2. **Klik Link (`clicks`)**: `SUM(inline_link_clicks)` (atau `clicks`).
-  3. **Landing Page View (`landing`)**: `SUM(actions[landing_page_view])` atau estimasi rasio klik-ke-halaman jika tracking belum terpasang.
-  4. **Chat Dimulai / Lead Masuk (`leads`)**: `SUM(actions[messaging_conversation_started_7d])` atau `leads` CRM.
-  5. **Dibalas (`replied`)**: jumlah lead dengan `first_replied_at IS NOT NULL`.
-  6. **Qualified (`qualified`)**: jumlah lead dengan status `stage IN ('QUALIFIED', 'CLOSING')` atau `score >= 70`.
-  7. **Closing (`closed`)**: jumlah lead dengan status `stage = 'CLOSING'` atau `closed_at IS NOT NULL`.
-- [ ] Rasio konversi:
-  - Rasio tahap: `(stage[n] / stage[n-1]) * 100`.
-  - Rasio dari impresi pertama: `(stage[n] / impressions) * 100`.
-  - Delta persentase per tahap dibanding periode sebelumnya.
+  - Query parameters: `accountId`, `since`, `until`, `campaignId`, `objectiveGroup` (`wa` | `web`).
+- [ ] Tahap kanal **WhatsApp**:
+  1. `impressions` — `SUM(impressions)`.
+  2. `link_clicks` — `SUM(inline_link_clicks)`.
+  3. `messaging_started` — action percakapan dimulai, sumber `"meta"`.
+  4. `observed` — lead yang tercatat di FunnelLens, sumber `"cross"`, `estimated: true`.
+  5. `replied` — lead dengan `first_replied_at IS NOT NULL`.
+  6. `qualified` — `stage IN ('QUALIFIED','CLOSING')`.
+  7. `closed` — `stage = 'CLOSED'` atau `closed_at IS NOT NULL`.
+- [ ] Tahap kanal **Website**: `impressions → link_clicks → lpv → view_content → add_to_cart → purchase`.
+- [ ] Setiap event diambil dengan satu representasi saja memakai `LEAD_ACTION_PRECEDENCE` / `PURCHASE_ACTION_PRECEDENCE` (`ad-insight-daily.repository.ts`) agar tipe umum dan tipe pixel tidak dihitung dua kali. Tidak ada estimasi rasio klik-ke-halaman.
+- [ ] Per pasangan tahap: `rate` (kini), `baseline` (periode lalu), `deltaPp`, `estimatedGap`, `eligible`.
+  - `rate = now.before > 0 ? now.after / now.before : null`.
+  - `baseline = prior.before > 0 ? prior.after / prior.before : null`.
+  - `deltaPp = 100 * (rate - baseline)`; `estimatedGap = max(0, round(now.before * baseline - now.after))`.
+  - `eligible` hanya bila kedua periode memenuhi gerbang: `before ≥ 100` untuk tahap pertama, `≥ 30` setelah chat, dan status tracking `up_to_date`.
+- [ ] Rasio terhadap impresi pertama dihitung terpisah dan ditandai bukan pembanding lintas periode.
+- [ ] Respons: `{stages, pairs, objectiveGroup, period, previousPeriod, note?}`; setiap blok menyertakan `sample: {n, denominator, eligible, gate}`.
 
-### 2. Rule Engine Deteksi Kebocoran (Leakage Detection)
-- [ ] Endpoint `GET /api/analytics/leakage`:
-  - Query parameters: `accountId`, `since`, `until`.
-- [ ] Evaluasi 3 titik kebocoran utama:
-  1. **Kebocoran Klik ke Landing Page**:
-     - Persentase drop: `1 - (landing_page_views / inline_link_clicks)`.
-     - Ambang batas wajar (misal drop > 35%).
-     - Analisis kemungkinan penyebab: waktu muat halaman (page speed) lambat, bounce rate tinggi, redirect lag.
-  2. **Kebocoran Chat Masuk ke Balasan**:
-     - Persentase drop: `1 - (replied_leads / total_chats)`.
-     - Analisis kemungkinan penyebab: keterlambatan respons agen/CS di luar jam operasional.
-  3. **Kebocoran Qualified ke Closing**:
-     - Persentase drop: `1 - (closing_deals / qualified_leads)`.
-     - Analisis kemungkinan penyebab: penanganan objection harga, follow-up kurang intensif.
-- [ ] Kalkulasi Dampak Finansial (Financial Impact Rp):
-  - Rumus: `lost_leads * downstream_conversion_rate * average_order_value (AOV)`.
-  - Simpan konfigurasi AOV per akun atau hitung dari rata-rata `deal_value_minor`.
-- [ ] Action Checklist:
-  - Kembalikan daftar rekomendasi tindakan taktis yang dapat diceklis pengguna untuk mengatasi masing-masing kebocoran.
-- [ ] Segmentasi Kebocoran:
-  - Breakdown kebocoran berdasarkan perangkat (`impression_device`: Mobile vs Desktop vs Tablet) dan jam aktivitas (`hourly_stats`).
+### 2. Deteksi Kebocoran
+- [ ] Endpoint `GET /api/analytics/leakage` (`accountId`, `since`, `until`).
+- [ ] Pilih `deltaPp` negatif terkecil dari pasangan yang `eligible`; kembalikan `{transition, rate, baseline, deltaPp, estimatedGap, trackingState, note}`.
+- [ ] Tanpa pasangan eligible → `{transition: null, note: "Cakupan belum cukup untuk membandingkan konversi."}`.
+- [ ] Ambang keparahan: `WARNING` bila `deltaPp ≤ −5`, `CRITICAL` bila `≤ −15`.
+- [ ] `impactMinor = null`; `impactCaption = "≈{estimatedGap} chat hilang"` (jumlah chat, bukan uang).
+- [ ] Tidak ada bagian dampak finansial, AOV, atau daftar penyebab (page speed, bounce, jam operasional, objection harga).
 
-### 3. Detail Tahap Funnel (Stage Detail)
-- [ ] Endpoint `GET /api/analytics/funnel/stage-detail`:
-  - Query parameters: `accountId`, `stageKey`, `since`, `until`.
-- [ ] Daily time-series per stage: jumlah event per hari sepanjang rentang tanggal.
-- [ ] Stage Comparison Table:
-  - Kolom: Nama Tahap, Volume Periode Ini, Volume Periode Lalu, Perubahan (%), Rasio Konversi Tahap, Status (Normal / Perlu Perhatian / Kritis).
+### 3. Detail Tahap
+- [ ] Endpoint `GET /api/analytics/funnel/stage-detail` (`accountId`, `stageKey`, `since`, `until`).
+- [ ] `daily[]`: jumlah event per hari sepanjang rentang.
+- [ ] `comparisonTable[]`: nama tahap, volume periode ini, volume periode lalu, perubahan (%), rasio konversi tahap, status `normal | perlu_perhatian | kritis` (delta ≤ −5pp / ≤ −15pp).
+- [ ] Segmentasi per jam dan perangkat dipenuhi `GET /api/analytics/audience/segments` (`hours[]`), bukan endpoint baru.
+
+## Uji Selesai
+- 250 chat dari 1.000 klik (periode lalu) vs 180 dari 900 (kini) → `rate 0.2`, `baseline 0.25`, `deltaPp -5`, `estimatedGap 45`, status `perlu_perhatian`.
+- Tanpa klik pada salah satu periode → `rate null`, `deltaPp null`, dan `note` yang menjelaskan gerbang.
+- `estimatedGap` muncul sebagai jumlah chat pada `impactCaption`; `impactMinor` tetap `null`.

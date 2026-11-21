@@ -1,45 +1,38 @@
 # TODO: Alerts & Health Scoring Engine
 
 ## Gambaran Fitur
-Engine komputasi untuk menghitung skor kesehatan bisnis dan funnel secara dinamis, mengidentifikasi anomali/kebocoran konversi, serta menghasilkan notifikasi peringatan pintar (smart insights & alerts) beserta rekomendasi aksi perbaikan.
+Engine komputasi skor kesehatan funnel (3 komponen), rule generator alert otomatis (`insight_alerts`), serta endpoint manajemen alert. Tidak ada skor gabungan bisnis dan tidak ada estimasi kerugian dalam uang.
 
 ## Daftar Pekerjaan
 
-### 1. Funnel & Business Health Composite Score Engine
-- [ ] Formula Skor Kesehatan Funnel (0–100):
-  - Bobot Konversi Funnel (40%): rasio konversi klik ke chat dan chat ke closing dibanding benchmark historis.
-  - Bobot Kecepatan Respons (30%): persentase chat yang dibalas di bawah 15 menit dan ketiadaan lead macet.
-  - Bobot Kualitas Tracking (30%): skor EMQ Pixel/CAPI dan kelengkapan parameter event.
-- [ ] Formula Skor Kesehatan Bisnis (0–100):
-  - Gabungan nilai ROAS relatif terhadap target, stabilitas CPA / Cost per Lead, dan tren pertumbuhan volume lead mingguan.
-- [ ] Penentuan Label & Badge Status:
-  - Skor >= 80: "Kondisi Prima / Sangat Sehat" (badge hijau).
-  - Skor 60–79: "Perlu Perhatian" (badge kuning).
-  - Skor < 60: "Kritis / Butuh Tindakan Segera" (badge merah).
+### 1. Skor Kesehatan Funnel
+- [ ] `funnelHealth({conversion, baseline, onTimeReplyShare, emq, dedup})` → `{score, badge, components}`.
+- [ ] Tiga komponen berbobot 40/30/30:
+  - Konversi funnel kini vs baseline historis (40).
+  - Porsi chat dibalas ≤ 15 menit (30).
+  - Kualitas tracking: EMQ dan dedup CAPI (30).
+- [ ] Komponen `null` dikeluarkan dan bobot dinormalkan ulang; komponen tersisa `< 2` → `score: null`, `badge: null`, `note: "Komponen pengukuran belum cukup"`.
+- [ ] Badge: `≥ 80 "Prima"`, `60–79 "Perlu perhatian"`, `< 60 "Kritis"`.
 
-### 2. Rule Engine Pembuatan Alert Otomatis (`insight_alerts`)
-- [ ] **Rule 1: Kebocoran Konversi Signifikan (Leakage Alert)**
-  - Trigger: Drop rate klik-ke-landing atau chat-ke-balas melampaui ambang batas (> 40%).
-  - Payload: Tingkat keparahan (`HIGH`), judul ("Kebocoran tahap landing page terdeteksi"), estimasi nominal kerugian Rp, rekomendasi tindakan.
-- [ ] **Rule 2: Hot Lead Menunggu Balasan Lama (Unreplied Alert)**
-  - Trigger: Ada lead berstatus `temperature = 'HOT'` yang belum mendapat balasan > 30 menit.
-  - Payload: Tingkat keparahan (`CRITICAL`), judul ("Lead siap beli belum direspons"), daftar nama/kontak lead, direct link ke chat.
-- [ ] **Rule 3: Ad Fatigue / Penurunan Performa Kreatif**
-  - Trigger: Frekuensi iklan > 3.5× disertai drop CTR > 25% pada kreatif unggulan.
-  - Payload: Tingkat keparahan (`MEDIUM`), judul ("Iklan [Nama Ad] mengalami kejenuhan"), rekomendasi penyegaran visual.
-- [ ] **Rule 4: Masalah Kualitas Tracking (Tracking EMQ Alert)**
-  - Trigger: EMQ event Lead turun di bawah 6.0/10 atau deduplikasi CAPI < 85%.
-  - Payload: Tingkat keparahan (`HIGH`), panduan perbaikan parameter hashing.
+### 2. Rule Generator (`insight_alerts`)
+- [ ] `evaluate(accountId, period)` mengembalikan `InsightAlertUpsert[]`; idempoten lewat `upsert` pada `(account_id, rule_key, entity_id)`; `entity_id` level akun = string kosong, bukan `NULL`.
+- [ ] `ruleKey` dan ambang:
+  - `leak_click_to_landing`, `leak_chat_to_reply`, `leak_qualified_to_closed` — dari hasil kebocoran; `WARNING` bila `deltaPp ≤ −5`, `CRITICAL` bila `≤ −15`; `impactMinor = null`, `impactCaption = "≈{estimatedGap} chat hilang"`.
+  - `unreplied_hot_lead` — lead HOT tanpa balasan > 30 menit → `CRITICAL`, `entityId = leadId`, `route = "/leads/{id}"`.
+  - `creative_fatigue` — `fatigue() === "Jenuh"` → `WARNING`, `entityId = creativeId`.
+  - `tracking_emq` — `emqAvg < 6` atau `dedupRate < 0.85` → `WARNING`.
+- [ ] Setiap baris membawa `evidence` (snapshot, angka pemicu) dan `confidence`.
+- [ ] Queue `alerts-evaluate` (BullMQ repeat tiap jam) memanggil `evaluate` untuk setiap akun terpilih.
 
 ### 3. Alerts Management API
-- [ ] Endpoint `GET /api/alerts`:
-  - Query parameters: `accountId`, `status` (`active` | `snoozed` | `resolved`).
-  - Response: daftar alert terstruktur dengan level (`critical`, `warning`, `info`), judul, deskripsi, estimasi dampak, confidence level, dan action items.
-- [ ] Endpoint `PATCH /api/alerts/:id/snooze`:
-  - Menunda peringatan untuk jangka waktu tertentu (misal 24 jam / 7 hari).
-  - Simpan `snoozed_until` di database.
-- [ ] Endpoint `PATCH /api/alerts/:id/resolve`:
-  - Menandai peringatan telah ditangani atau diabaikan oleh pengguna.
-  - Rekam `resolved_at` dan `resolved_by`.
-- [ ] Badge Notifikasi Shell Global:
-  - Hitung jumlah alert aktif yang belum di-resolve untuk icon lonceng notifikasi di topbar UI.
+- [ ] `GET /api/alerts` (`accountId`, `status`): `active` = `ACTIVE` dan `snoozed_until` kosong/lewat; `snoozed` = `SNOOZED` dengan `snoozed_until > now()`; `resolved` = `DONE`.
+- [ ] `PATCH /api/alerts/:id/snooze` body `{hours: 24 | 168}`: `status="SNOOZED"`, `snoozedUntil = now() + hours`.
+- [ ] `PATCH /api/alerts/:id/resolve`: `status="DONE"`, `resolvedAt = now()`, `resolvedBy = user.iss`.
+- [ ] `GET /api/alerts/badge`: `{count}` jumlah alert `ACTIVE` yang belum di-snooze.
+- [ ] Semua route memakai `JwtUtil.isAuthenticated` + `requireAccountScope`; alert milik tenant lain → 404.
+
+## Uji Selesai
+- `snooze` 24 jam → alert hilang dari `status=active`, muncul di `status=snoozed` dengan `snoozedUntil` ≈ +24 jam.
+- `resolve` → `resolvedAt` terisi dan alert pindah ke `status=resolved`.
+- Akun milik tenant lain → 404.
+- Tanpa komponen tracking, `funnelHealth()` mengembalikan `score: null` + `note`, bukan `0`.

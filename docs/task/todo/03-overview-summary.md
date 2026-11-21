@@ -1,52 +1,47 @@
 # TODO: Overview & Summary Analytics
 
 ## Gambaran Fitur
-Endpoint dan service untuk menyediakan data halaman utama/ikhtisar (`app.js:overview()`), mencakup KPI cards, sparklines tren mini, perbandingan periode sebelumnya, time-series grafik, panel kesehatan bisnis, dan tabel performa campaign.
+Endpoint dan service untuk halaman utama/ikhtisar, mencakup kartu KPI, sparkline tren mini, perbandingan periode sebelumnya, time-series grafik, panel kesehatan, dan tabel performa campaign.
 
 ## Daftar Pekerjaan
 
 ### 1. KPI Summary Service & Endpoint
-- [ ] Buat modul baru `src/modules/analytics/` (atau tambahkan di controller analitik).
-- [ ] Endpoint `GET /api/analytics/summary`:
-  - Query parameters:
-    - `accountId`: string (required)
-    - `since`: string YYYY-MM-DD (required)
-    - `until`: string YYYY-MM-DD (required)
-    - `campaignId`: string (optional)
-- [ ] Kalkulasi KPI Cards:
-  - **Belanja Iklan (`spend`)**: `SUM(spend)` dalam mata uang akun.
-  - **Lead Masuk (`leads`)**: `SUM(actions)` untuk action type primer (WhatsApp chat / Lead form).
-  - **Biaya / Lead Qualified (`cpl_qualified`)**: `total_spend / qualified_leads_count`.
-  - **ROAS (`roas`)**: `total_conversion_value / total_spend` (dari nilai purchase CAPI / deal CRM).
-  - **Skor Kesehatan Funnel (`funnel_health`)**: nilai komposit 0–100 berdasarkan konversi funnel & kecepatan respons.
-- [ ] Kalkulasi Delta Persentase (% vs Periode Sebelumnya):
-  - Hitung rentang periode sebelumnya yang berdurasi sama persis (`previous_since` s/d `previous_until`).
-  - Rumus delta: `((current - previous) / previous) * 100`.
-- [ ] Sparkline Data:
-  - Array 7 titik nilai agregat per sub-interval periode untuk render sparkline mini di kartu KPI.
+- [ ] Modul `src/modules/analytics/` dengan `GET /api/analytics/summary`:
+  - Query parameters: `accountId` (required), `since` (YYYY-MM-DD), `until` (YYYY-MM-DD), `campaignId` (opsional).
+  - Setiap route memakai `JwtUtil.isAuthenticated` dan `requireAccountScope(tenantId, accountId)`; akun milik tenant lain → `NotFoundError("Akun iklan tidak ditemukan")`.
+- [ ] Kartu KPI (`cards`), masing-masing `{value, deltaPct, sparkline[7], note?}`:
+  - **Belanja Iklan (`spend`)**: `SUM(spend_minor)` dalam mata uang akun.
+  - **Lead Masuk (`leads`)**: action primer (WhatsApp chat / Lead form) sesuai `LEAD_ACTION_PRECEDENCE`.
+  - **Biaya / Lead Qualified (`cplQualified`)**: `spend / qualified_leads`; `qualified` = `stage IN ('QUALIFIED','CLOSING')`.
+  - **ROAS (`roas`)**: `purchase_value_minor / spend_minor`.
+  - **Funnel Health (`funnelHealth`)**: hasil `funnelHealth()` (lihat bagian 2).
+- [ ] Delta persentase: rentang periode sebelumnya sama panjang, berakhir `since − 1 hari`; `((current - previous) / previous) * 100`; `null` bila `previous` nol.
+- [ ] Sparkline: 7 titik agregat per sub-interval periode berjalan.
+- [ ] Setiap `null` wajib disertai `note` berbahasa Indonesia.
 
-### 2. Panel Tren Time-Series
-- [ ] Agregasi time-series harian:
-  - Seri `spend` harian (periode berjalan vs periode sebelumnya).
-  - Seri `leads` harian (periode berjalan vs periode sebelumnya).
-  - Penyesuaian timezone akun iklan (`timezone_name`).
+### 2. Panel Kesehatan (`funnelHealth()`)
+- [ ] Tiga komponen berbobot 40/30/30:
+  - Konversi funnel saat ini vs baseline historis (bobot 40).
+  - Porsi chat yang dibalas ≤ 15 menit (bobot 30).
+  - Kualitas tracking: EMQ dan dedup CAPI (bobot 30).
+- [ ] Komponen `null` dikeluarkan dan bobot dinormalkan ulang; bila komponen tersisa `< 2` → `score: null`, `badge: null`, `note: "Komponen pengukuran belum cukup"`.
+- [ ] Badge: `≥ 80 "Prima"`, `60–79 "Perlu perhatian"`, `< 60 "Kritis"`.
+- [ ] Tidak ada skor gabungan bisnis (ROAS/CPA/pertumbuhan); nilai tersebut tampil sebagai kartu masing-masing, bukan skor.
 
-### 3. Panel Kesehatan Bisnis & Unreplied Hot Leads
-- [ ] Response status kesehatan:
-  - Skor kesehatan bisnis (0–100) dan badge ("Baik", "Perlu perhatian", "Kritis").
-  - 3 ringkasan baris status:
-    1. Jumlah kebocoran yang perlu ditangani.
-    2. Jumlah hot lead yang menunggu balasan.
-    3. Jumlah materi iklan/kreatif berkinerja unggul.
-- [ ] Hot Leads Panel:
-  - Top 3–5 lead berstatus `temperature = 'HOT'` yang belum dibalas (`first_replied_at IS NULL`).
-  - Kembalikan: nama lead, nomor telepon tersensor (`phone_masked`), skor (0–100), durasi menunggu dalam menit.
+### 3. Panel Tren Time-Series
+- [ ] Seri `spend` dan `leads` harian (periode berjalan vs periode sebelumnya) dari `getDailyTrend`.
+- [ ] Tanggal mengikuti zona waktu akun (`ad_accounts.timezone_name`); tanggal insight tidak digeser lagi.
 
-### 4. Tabel Performa Campaign
-- [ ] Kembalikan daftar campaign aktif pada rentang tanggal:
-  - `campaign_id`, `name`, `status` / `effective_status`.
-  - `spend` per campaign.
-  - `leads` per campaign.
-  - `cost_per_lead = spend / leads`.
-  - `hot_lead_rate = hot_leads / leads * 100`.
-  - `roas = purchase_value / spend`.
+### 4. Unreplied Hot Leads & Ringkasan Status
+- [ ] Top 5 lead `temperature = 'HOT'` dengan `first_replied_at IS NULL`, urut tunggu terlama: `{leadId, name, phoneMasked, confidence, waitingMinutes}`.
+- [ ] `confidence` diambil dari assessment terakhir (`lead_assessments`); tidak ada skor numerik lead.
+- [ ] Tiga baris ringkasan: jumlah kebocoran yang perlu ditangani, jumlah hot lead menunggu balasan, jumlah kreatif berstatus `Winner`.
+
+### 5. Tabel Performa Campaign
+- [ ] Kolom: `campaignId`, `name`, `status`, `spendMinor`, `leads`, `costPerLeadMinor`, `hotLeadRate`, `roas`.
+- [ ] `hotLeadRate` = lead dengan tonggak HOT pada periode / total lead teratribusi pada periode; `null` + `note` bila tidak ada lead teratribusi.
+
+## Uji Selesai
+- `GET /api/analytics/summary` untuk tenant dengan akun terpilih mengembalikan 5 kartu; setiap `value` yang `null` disertai `note`.
+- Akun tanpa data tracking → `health.score` `null` dengan `note: "Komponen pengukuran belum cukup"`, bukan `0`.
+- `campaigns[].hotLeadRate` sama dengan hasil hitung manual tonggak HOT dibagi lead teratribusi.
