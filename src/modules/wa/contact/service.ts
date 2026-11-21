@@ -1,4 +1,4 @@
-import {WaPhoneRepository} from "@/database/repository/wa-phone.repository";
+import {WaPhoneRepository} from "@db/repositories/wa-phone.repository";
 
 export class WaContactService {
     private readonly waPhoneRepository = new WaPhoneRepository();

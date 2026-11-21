@@ -1,8 +1,8 @@
 // ponytail: pagination dan filtering lanjutan di-skip; tambah saat list user per tenant butuh paging (>100 users).
-import {UserRepository} from "@/database/repository/user.repository";
+import {UserRepository} from "@db/repositories/user.repository";
 import {UserSchema} from "@/modules/user/schema";
-import {BadRequestError, NotFoundError} from "@/utils/error";
-import {PasswordUtil} from "@/utils/password";
+import {BadRequestError, NotFoundError} from "@shared/errors";
+import {PasswordUtil} from "@shared/password";
 
 export class UserService {
     private readonly userRepository = new UserRepository();
@@ -32,7 +32,7 @@ export class UserService {
             hashPassword,
             tenantId,
             role: body.role ?? "ADMIN",
-            isVerified: new Date(),
+            verifiedAt: new Date(),
         });
 
         return {
@@ -40,7 +40,7 @@ export class UserService {
             fullName: entity.fullName,
             email: entity.email,
             role: entity.role,
-            isVerified: entity.isVerified,
+            verifiedAt: entity.verifiedAt,
             tenantId: entity.tenantId,
         };
     }

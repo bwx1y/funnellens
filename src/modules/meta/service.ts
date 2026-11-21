@@ -1,9 +1,9 @@
 import {Config} from "@/config";
-import {MetaConnectionEntity} from "@/database/entity/meta-connection.entity";
-import {MetaConnectionRepository} from "@/database/repository/meta-connection.repository";
-import {BadRequestError, InternalError, NotFoundError} from "@/utils/error";
-import {JwtUtil} from "@/utils/jwt";
-import {logger} from "@/utils/logger";
+import {MetaConnectionEntity} from "@db/schema/ads/meta-connection.entity";
+import {MetaConnectionRepository} from "@db/repositories/meta-connection.repository";
+import {BadRequestError, InternalError, NotFoundError} from "@shared/errors";
+import {JwtUtil} from "@shared/jwt";
+import {logger} from "@shared/logger";
 import type {MetaSchema} from "@/modules/meta/schema";
 
 const GRAPH_URL = "https://graph.facebook.com";

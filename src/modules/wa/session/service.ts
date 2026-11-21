@@ -2,10 +2,10 @@ import {WaSessionSchema} from "@/modules/wa/session/schema";
 import {OpenWAClient} from "@rmyndharis/openwa";
 import {Config} from "@/config";
 
-import {WaSessionRepository} from "@/database/repository/wa-session.repository";
-import {NotFoundError} from "@/utils/error";
-import {logger} from "@/utils/logger";
-import {QueueManager} from "@/utils/queue";
+import {WaSessionRepository} from "@db/repositories/wa-session.repository";
+import {NotFoundError} from "@shared/errors";
+import {logger} from "@shared/logger";
+import {QueueManager} from "@infra/queue";
 
 export class WaSessionService {
     static readonly QUEUE_NAME = "queue-session-wa";

@@ -1,8 +1,8 @@
-import {WorkerManager} from "@/utils/queue";
+import {WorkerManager} from "@infra/queue";
 import {WaSessionService} from "@/modules/wa/session/service";
 import {OpenWAClient, type WebhookEvent, type WebhookFilters} from "@rmyndharis/openwa";
 import {Config} from "@/config";
-import {logger} from "@/utils/logger";
+import {logger} from "@shared/logger";
 
 const openWa = new OpenWAClient({
     baseUrl: Config.openWa.url,

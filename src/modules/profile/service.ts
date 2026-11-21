@@ -1,6 +1,6 @@
-import {UserRepository} from "@/database/repository/user.repository";
-import {UnauthorizedError, BadRequestError} from "@/utils/error";
-import {PasswordUtil} from "@/utils/password";
+import {UserRepository} from "@db/repositories/user.repository";
+import {UnauthorizedError, BadRequestError} from "@shared/errors";
+import {PasswordUtil} from "@shared/password";
 import {ProfileSchema} from "@/modules/profile/schema";
 export class ProfileService {
     private readonly userRepository = new UserRepository();
@@ -16,7 +16,8 @@ export class ProfileService {
             email: entity.user.email,
             fullName: entity.user.fullName,
             role: entity.user.role,
-            isVerified: entity.user.isVerified,
+            isVerified: !!entity.user.verifiedAt,
+            verifiedAt: entity.user.verifiedAt,
             tenant: {
                 id: entity.tenant.id,
                 name: entity.tenant.name,

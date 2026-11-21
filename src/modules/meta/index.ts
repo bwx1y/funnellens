@@ -1,5 +1,5 @@
 import {Elysia} from "elysia";
-import {JwtUtil} from "@/utils/jwt";
+import {JwtUtil} from "@shared/jwt";
 import {MetaService} from "@/modules/meta/service";
 import {MetaSchema} from "@/modules/meta/schema";
 

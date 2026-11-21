@@ -1,11 +1,11 @@
-import {UserRepository} from "@/database/repository/user.repository";
-import {TenantRepository} from "@/database/repository/tenant.repository";
-import {UserTokenRepository} from "@/database/repository/user-token.repository";
+import {UserRepository} from "@db/repositories/user.repository";
+import {TenantRepository} from "@db/repositories/tenant.repository";
+import {UserTokenRepository} from "@db/repositories/user-token.repository";
 import {AuthSchema} from "@/modules/auth/schema";
-import {BadRequestError} from "@/utils/error";
-import {JwtUtil} from "@/utils/jwt";
-import {PasswordUtil} from "@/utils/password";
-import {QueueManager} from "@/utils/queue";
+import {BadRequestError} from "@shared/errors";
+import {JwtUtil} from "@shared/jwt";
+import {PasswordUtil} from "@shared/password";
+import {QueueManager} from "@infra/queue";
 import type {SendEmailTokenJob} from "@/modules/auth/worker";
 
 export class AuthService {
@@ -39,7 +39,8 @@ export class AuthService {
             email: entity.user.email,
             fullName: entity.user.fullName,
             role: entity.user.role,
-            isVerified: entity.user.isVerified,
+            isVerified: !!entity.user.verifiedAt,
+            verifiedAt: entity.user.verifiedAt,
             tenant: {
                 id: entity.tenant.id,
                 name: entity.tenant.name,
@@ -98,7 +99,8 @@ export class AuthService {
             email: entityUser.email,
             fullName: entityUser.fullName,
             role: entityUser.role,
-            isVerified: entityUser.isVerified,
+            isVerified: !!entityUser.verifiedAt,
+            verifiedAt: entityUser.verifiedAt,
             tenant: {
                 id: entityTenant.id,
                 name: entityTenant.name,
@@ -162,7 +164,7 @@ export class AuthService {
             throw new BadRequestError("Email not found");
         }
 
-        if (entity.user.isVerified) {
+        if (entity.user.verifiedAt) {
             throw new BadRequestError("Email already verified");
         }
 
@@ -171,7 +173,7 @@ export class AuthService {
             throw new BadRequestError("Invalid or expired code");
         }
 
-        await this.userRepository.update(entity.user.id, {isVerified: new Date()});
+        await this.userRepository.update(entity.user.id, {verifiedAt: new Date()});
         await this.userTokenRepository.markAsUsed(token.id);
 
         return {
@@ -185,7 +187,7 @@ export class AuthService {
             throw new BadRequestError("Email not found");
         }
 
-        if (entity.user.isVerified) {
+        if (entity.user.verifiedAt) {
             throw new BadRequestError("Email already verified");
         }
 

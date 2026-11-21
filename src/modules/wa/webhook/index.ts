@@ -1,6 +1,6 @@
 import {Elysia} from "elysia";
-import {BadRequestError} from "@/utils/error";
-import {logger} from "@/utils/logger";
+import {BadRequestError} from "@shared/errors";
+import {logger} from "@shared/logger";
 import type {WebhookDelivery} from "@rmyndharis/openwa";
 import {WaWebhookService} from "@/modules/wa/webhook/service";
 import {MessageReceived} from "@/modules/wa/webhook/schema";

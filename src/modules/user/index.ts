@@ -1,6 +1,6 @@
 import {Elysia} from "elysia";
-import {JwtUtil} from "@/utils/jwt";
-import {ForbiddenError} from "@/utils/error";
+import {JwtUtil} from "@shared/jwt";
+import {ForbiddenError} from "@shared/errors";
 import {UserService} from "@/modules/user/service";
 import {UserSchema} from "@/modules/user/schema";
 

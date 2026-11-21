@@ -1,5 +1,5 @@
 import {Elysia} from "elysia";
-import {JwtUtil} from "@/utils/jwt";
+import {JwtUtil} from "@shared/jwt";
 import {WaSessionService} from "@/modules/wa/session/service";
 import {WaSessionSchema} from "@/modules/wa/session/schema";
 

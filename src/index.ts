@@ -1,12 +1,12 @@
 import {Elysia} from "elysia";
 import openapi from "@elysia/openapi";
-import {AppError} from "@/utils/error";
+import {AppError} from "@shared/errors";
 import {Config} from "@/config";
 import {routes} from "@/routes";
-import {httpLogger} from "@/plugins/loger.plugin";
-import {WorkerManager} from "@/utils/queue";
-import {redisConnection} from "@/utils/redis";
-import {logger} from "@/utils/logger";
+import {httpLogger} from "@/plugins/logger.plugin";
+import {WorkerManager} from "@infra/queue";
+import {redisConnection} from "@infra/redis";
+import {logger} from "@shared/logger";
 import {WaSessionService} from "@/modules/wa/session/service";
 
 // Dynamic discovery of worker files across feature modules

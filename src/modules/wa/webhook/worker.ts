@@ -1,17 +1,17 @@
-import {WorkerManager} from "@/utils/queue";
+import {WorkerManager} from "@infra/queue";
 import {WaWebhookService} from "@/modules/wa/webhook/service";
 import type {LeadAiResponse, MessageReceived} from "@/modules/wa/webhook/schema";
-import {logger} from "@/utils/logger";
+import {logger} from "@shared/logger";
 import {Config} from "@/config";
 import {OpenWAClient} from "@rmyndharis/openwa";
-import {WaMessageRepository} from "@/database/repository/wa-message.repository";
-import {WaPhoneRepository} from "@/database/repository/wa-phone.repository";
+import {WaMessageRepository} from "@db/repositories/wa-message.repository";
+import {WaPhoneRepository} from "@db/repositories/wa-phone.repository";
 import {encode, decode} from "@toon-format/toon";
-import {GeminiAdapter} from "@/providers/ai/adapter/gemini.adapter";
-import type {AIMessage} from "@/providers/ai/types";
-import {redisConnection} from "@/utils/redis";
-import leadRules from "./prompt/lead-rules.json";
-import fewShot from "./prompt/few-shot.json";
+import {GeminiAdapter} from "@infra/ai/adapters/gemini.adapter";
+import type {AIMessage} from "@infra/ai/types";
+import {redisConnection} from "@infra/redis";
+import leadRules from "./prompts/lead-rules.json";
+import fewShot from "./prompts/few-shot.json";
 
 export type ProcessMessageJob = MessageReceived & {
     session: string;

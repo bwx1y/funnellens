@@ -1,6 +1,6 @@
 import {Elysia} from "elysia";
 import {AuthSchema} from "@/modules/auth/schema";
-import {BadRequestError} from "@/utils/error";
+import {BadRequestError} from "@shared/errors";
 import {AuthService} from "@/modules/auth/service";
 
 export const AuthController = new Elysia({

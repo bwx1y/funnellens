@@ -1,8 +1,8 @@
-import {WaSessionRepository} from "@/database/repository/wa-session.repository";
-import {UserRepository} from "@/database/repository/user.repository";
-import {TenantRepository} from "@/database/repository/tenant.repository";
-import {QueueManager} from "@/utils/queue";
-import {logger} from "@/utils/logger";
+import {WaSessionRepository} from "@db/repositories/wa-session.repository";
+import {UserRepository} from "@db/repositories/user.repository";
+import {TenantRepository} from "@db/repositories/tenant.repository";
+import {QueueManager} from "@infra/queue";
+import {logger} from "@shared/logger";
 import {AuthService} from "@/modules/auth/service";
 import type {SendSessionDisconnectedJob} from "@/modules/auth/worker";
 import {MessageReceived} from "@/modules/wa/webhook/schema";

@@ -6,6 +6,8 @@
     "dev": "bun run --watch src/index.ts",
     "db:generate": "drizzle-kit generate",
     "db:push": "drizzle-kit push",
+    "db:drop": "bun run scripts/db-drop.ts",
+    "db:reset": "bun run scripts/db-drop.ts && drizzle-kit push --force",
     "db:studio": "drizzle-kit studio"
   },
   "dependencies": {

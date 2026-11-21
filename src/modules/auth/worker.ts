@@ -1,6 +1,6 @@
-import {WorkerManager} from "@/utils/queue";
+import {WorkerManager} from "@infra/queue";
 import {AuthService} from "@/modules/auth/service";
-import {MailUtil} from "@/utils/mail";
+import {MailUtil} from "@infra/mail";
 
 export interface SendEmailTokenJob {
     type: "verification" | "reset-password";

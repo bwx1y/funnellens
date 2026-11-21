@@ -1,5 +1,5 @@
 import {Elysia} from "elysia";
-import {JwtUtil} from "@/utils/jwt";
+import {JwtUtil} from "@shared/jwt";
 import {WaContactService} from "@/modules/wa/contact/service";
 
 export const WaContactController = new Elysia({

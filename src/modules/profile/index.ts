@@ -1,8 +1,8 @@
 import {Elysia} from "elysia";
-import {JwtUtil} from "@/utils/jwt";
+import {JwtUtil} from "@shared/jwt";
 import {ProfileService} from "@/modules/profile/service";
 import {ProfileSchema} from "@/modules/profile/schema";
-import {BadRequestError} from "@/utils/error";
+import {BadRequestError} from "@shared/errors";
 export const ProfileController = new Elysia({
     prefix: "/profile",
     detail: {
