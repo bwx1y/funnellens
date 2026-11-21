@@ -22,6 +22,7 @@ export class WaPhoneRepository extends DatabaseRepository {
         const [result] = await this.database
             .insert(WaPhoneEntity)
             .values({
+                tenantId: sql`(select tenant_id from wa_session where id = ${data.sessionId})`,
                 sessionId: data.sessionId,
                 phone: data.phone,
                 phoneName: data.phoneName,
@@ -48,6 +49,17 @@ export class WaPhoneRepository extends DatabaseRepository {
             .limit(1);
 
         return result;
+    }
+
+    /** Binds a Cloud API webhook (`entry.metadata.phone_number_id`) to its tenant phone row. */
+    async findByPhoneNumberId(phoneNumberId: string): Promise<(typeof WaPhoneEntity.$inferSelect) | null> {
+        const [result] = await this.database
+            .select()
+            .from(WaPhoneEntity)
+            .where(eq(WaPhoneEntity.phoneNumberId, phoneNumberId))
+            .limit(1);
+
+        return result ?? null;
     }
 
     async findAllByTenantId(tenantId: string, sessionId?: string) {
