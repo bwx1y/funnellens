@@ -1,0 +1,53 @@
+import {DatabaseRepository} from "./base.repository";
+import {SyncRunEntity} from "@db/schema/ads/sync-run.entity";
+import {and, desc, eq} from "drizzle-orm";
+
+export class SyncRunRepository extends DatabaseRepository {
+    async start(accountId: string, resource: string = "master"): Promise<typeof SyncRunEntity.$inferSelect> {
+        const [entity] = await this.database.insert(SyncRunEntity)
+            .values({
+                accountId,
+                resource,
+                status: "RUNNING",
+                startedAt: new Date(),
+            })
+            .returning();
+
+        return entity;
+    }
+
+    async finish(id: number, rowsUpserted: number): Promise<void> {
+        await this.database.update(SyncRunEntity)
+            .set({
+                status: "SUCCESS",
+                finishedAt: new Date(),
+                rowsUpserted,
+            })
+            .where(eq(SyncRunEntity.id, id));
+    }
+
+    async fail(id: number, error: string): Promise<void> {
+        await this.database.update(SyncRunEntity)
+            .set({
+                status: "FAILED",
+                finishedAt: new Date(),
+                error,
+            })
+            .where(eq(SyncRunEntity.id, id));
+    }
+
+    async getLatestByAccountId(accountId: string, resource?: string): Promise<typeof SyncRunEntity.$inferSelect | null> {
+        const conditions = [eq(SyncRunEntity.accountId, accountId)];
+        if (resource) {
+            conditions.push(eq(SyncRunEntity.resource, resource));
+        }
+
+        const [entity] = await this.database.select()
+            .from(SyncRunEntity)
+            .where(and(...conditions))
+            .orderBy(desc(SyncRunEntity.startedAt))
+            .limit(1);
+
+        return entity ?? null;
+    }
+}

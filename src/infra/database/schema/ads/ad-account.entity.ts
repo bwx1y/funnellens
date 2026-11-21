@@ -1,4 +1,4 @@
-import {index, integer, pgTable, text, timestamp, uuid, varchar} from "drizzle-orm/pg-core";
+import {boolean, index, integer, pgTable, text, timestamp, uuid, varchar} from "drizzle-orm/pg-core";
 import {relations} from "drizzle-orm";
 import {TenantEntity} from "@db/schema/core/tenant.entity";
 
@@ -11,6 +11,7 @@ export const AdAccountEntity = pgTable("ad_accounts", {
     timezoneName: text("timezone_name").notNull(),
     accountStatus: integer("account_status"),
     businessId: text("business_id"),
+    isSelected: boolean("is_selected").notNull().default(false),
     createdAt: timestamp("created_at", {withTimezone: true}).defaultNow().notNull(),
     updatedAt: timestamp("updated_at", {withTimezone: true}).defaultNow().notNull(),
 }, (t) => ({

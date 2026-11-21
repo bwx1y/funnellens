@@ -38,4 +38,9 @@ export class MetaConnectionRepository extends DatabaseRepository {
 
         return entity ?? null;
     }
+
+    async findActiveConnections() {
+        return this.database.select()
+            .from(MetaConnectionEntity);
+    }
 }
