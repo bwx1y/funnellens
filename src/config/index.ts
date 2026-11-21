@@ -55,4 +55,10 @@ export const Config = {
             model: getEnv("GEMINI_MODEL", "gemini-2.5-flash"),
         },
     },
+    analytics: {
+        maturityDays: parseInt(getEnv("ANALYTICS_MATURITY_DAYS", "7")),
+    },
+    whatsapp: {
+        verifyToken: getEnv("WA_VERIFY_TOKEN", ""),
+    },
 };

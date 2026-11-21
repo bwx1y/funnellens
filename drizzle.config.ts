@@ -14,5 +14,5 @@ export default defineConfig({
         ssl: false
     },
     verbose: true,
-    strict: true
+    strict: false
 })
