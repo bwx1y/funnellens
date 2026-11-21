@@ -7,12 +7,44 @@ import {CampaignRepository} from "@db/repositories/campaign.repository";
 import {InsightAlertRepository} from "@db/repositories/insight-alert.repository";
 import {requireAccountScope} from "@db/repositories/ad-account.repository";
 import {BadRequestError} from "@shared/errors";
-import {addDays, bucketIndex, dayCount, endOfDayUtc, startOfDayUtc, todayInZone} from "@shared/dates";
+import {addDays, bucketIndex, dateRange, dayCount, endOfDayUtc, startOfDayUtc, todayInZone} from "@shared/dates";
 import {funnelHealth, type FunnelHealthResult, type HealthBadge} from "@shared/health";
+import {
+    FUNNEL_STAGES,
+    buildFunnelPairs,
+    leakageCaption,
+    pickLeakage,
+    stageChannel,
+    trackingStateOf,
+    type FunnelCountsLike,
+    type FunnelObjectiveGroup,
+    type FunnelPair,
+    type FunnelPairStatus,
+    type FunnelStageKey,
+    type FunnelStageSource,
+    type SampleBlock,
+    type StageDefinition,
+    type TrackingState,
+} from "@shared/funnel";
 
 const SPARKLINE_BUCKETS = 7;
 const DEFAULT_PERIOD_DAYS = 30;
 const HOT_LEAD_LIMIT = 5;
+
+/** Fill-in for the half of the counts a daily row does not carry; the stage reader picks its own field. */
+const EMPTY_FUNNEL_COUNTS: FunnelCountsLike = {
+    impressions: 0,
+    linkClicks: 0,
+    messagingStarted: 0,
+    lpv: 0,
+    viewContent: 0,
+    addToCart: 0,
+    purchase: 0,
+    observed: 0,
+    replied: 0,
+    qualified: 0,
+    closed: 0,
+};
 
 export interface SummaryQuery {
     accountId: string;
@@ -74,6 +106,82 @@ export interface SummaryResponse {
     sample: {n: number; denominator: number; eligible: boolean; gate: string};
 }
 
+export interface FunnelQuery {
+    accountId: string;
+    since?: string;
+    until?: string;
+    campaignId?: string;
+    objectiveGroup?: FunnelObjectiveGroup;
+}
+
+export interface LeakageQuery {
+    accountId: string;
+    since?: string;
+    until?: string;
+}
+
+export interface StageDetailQuery {
+    accountId: string;
+    stageKey: string;
+    since?: string;
+    until?: string;
+}
+
+export interface FunnelStageView {
+    key: FunnelStageKey;
+    label: string;
+    value: number;
+    source: FunnelStageSource;
+    estimated?: true;
+    /** Nilai tahap dibagi tayangan pada periode berjalan; bukan pembanding lintas periode. */
+    rateFromFirst: number | null;
+}
+
+export interface FunnelResponse {
+    objectiveGroup: FunnelObjectiveGroup;
+    period: {since: string; until: string; days: number};
+    previousPeriod: {since: string; until: string};
+    stages: FunnelStageView[];
+    pairs: FunnelPair[];
+    sample: SampleBlock;
+    note?: string;
+}
+
+export interface LeakageResponse {
+    transition: string | null;
+    rate: number | null;
+    baseline: number | null;
+    deltaPp: number | null;
+    estimatedGap: number | null;
+    severity: "WARNING" | "CRITICAL" | null;
+    trackingState: TrackingState;
+    impactMinor: null;
+    impactCaption: string | null;
+    note: string | null;
+}
+
+export interface StageComparisonRow {
+    stageKey: FunnelStageKey;
+    label: string;
+    current: number;
+    previous: number;
+    changePct: number | null;
+    conversionRate: number | null;
+    status: FunnelPairStatus;
+}
+
+export interface StageDetailResponse {
+    stageKey: FunnelStageKey;
+    label: string;
+    objectiveGroup: FunnelObjectiveGroup;
+    period: {since: string; until: string; days: number};
+    previousPeriod: {since: string; until: string};
+    daily: {date: string; value: number}[];
+    comparisonTable: StageComparisonRow[];
+    sample: SampleBlock;
+    note?: string;
+}
+
 /**
  * Overview endpoint. Every card value is either a real number or `null` with a note: a missing
  * measurement is never reported as zero.
@@ -92,20 +200,8 @@ export class AnalyticsService {
     async getSummary(tenantId: string, query: SummaryQuery): Promise<SummaryResponse> {
         const account = await requireAccountScope(tenantId, query.accountId);
 
-        const until = query.until ?? todayInZone(account.timezoneName);
-        const since = query.since ?? addDays(until, -(DEFAULT_PERIOD_DAYS - 1));
-        if (since > until) {
-            throw new BadRequestError("Rentang tanggal tidak valid");
-        }
-
-        const days = dayCount(since, until);
-        const previousUntil = addDays(since, -1);
-        const previousSince = addDays(previousUntil, -(days - 1));
-
-        const start = startOfDayUtc(since);
-        const end = endOfDayUtc(until);
-        const prevStart = startOfDayUtc(previousSince);
-        const prevEnd = endOfDayUtc(previousUntil);
+        const {since, until, days, previousSince, previousUntil, start, end, prevStart, prevEnd} =
+            this.resolvePeriod(account, query);
         const {accountId, campaignId} = query;
 
         const [
@@ -294,6 +390,306 @@ export class AnalyticsService {
                 eligible: current.impressions >= 100,
                 gate: "≥ 100 tayangan",
             },
+        };
+    }
+
+    async getFunnel(tenantId: string, query: FunnelQuery): Promise<FunnelResponse> {
+        const account = await requireAccountScope(tenantId, query.accountId);
+        const objectiveGroup = query.objectiveGroup ?? "wa";
+        const period = this.resolvePeriod(account, query);
+
+        const trackingState = trackingStateOf(await this.analyticsRepo.getTrackingSummary(query.accountId));
+        const funnel = await this.loadFunnel({
+            accountId: query.accountId,
+            campaignId: query.campaignId,
+            objectiveGroup,
+            start: period.start,
+            end: period.end,
+            prevStart: period.prevStart,
+            prevEnd: period.prevEnd,
+            trackingState,
+        });
+
+        const impressions = funnel.stages[0].value;
+        const stages: FunnelStageView[] = FUNNEL_STAGES[objectiveGroup].map((definition, index) => {
+            const value = funnel.stages[index].value;
+
+            return {
+                key: definition.key,
+                label: definition.label,
+                value,
+                source: definition.source,
+                ...(definition.estimated === true ? {estimated: true as const} : {}),
+                rateFromFirst: impressions > 0 ? round4(value / impressions) : null,
+            };
+        });
+
+        const response: FunnelResponse = {
+            objectiveGroup,
+            period: {since: period.since, until: period.until, days: period.days},
+            previousPeriod: {since: period.previousSince, until: period.previousUntil},
+            stages,
+            pairs: funnel.pairs,
+            sample: funnel.sample,
+        };
+
+        const note = this.funnelNote(trackingState, funnel.pairs);
+        if (note !== undefined) response.note = note;
+
+        return response;
+    }
+
+    async getLeakage(tenantId: string, query: LeakageQuery): Promise<LeakageResponse> {
+        const account = await requireAccountScope(tenantId, query.accountId);
+        const period = this.resolvePeriod(account, query);
+
+        const trackingState = trackingStateOf(await this.analyticsRepo.getTrackingSummary(query.accountId));
+        // WhatsApp only: the caption speaks about lost chats, and `web` would need its own wording.
+        const funnel = await this.loadFunnel({
+            accountId: query.accountId,
+            objectiveGroup: "wa",
+            start: period.start,
+            end: period.end,
+            prevStart: period.prevStart,
+            prevEnd: period.prevEnd,
+            trackingState,
+        });
+
+        const leak = pickLeakage(funnel.pairs);
+        if (leak === null) {
+            return {
+                transition: null,
+                rate: null,
+                baseline: null,
+                deltaPp: null,
+                estimatedGap: null,
+                severity: null,
+                trackingState,
+                impactMinor: null,
+                impactCaption: null,
+                note: funnel.pairs.some((pair) => pair.eligible)
+                    ? "Tidak ada transisi yang menurun pada periode ini."
+                    : "Cakupan belum cukup untuk membandingkan konversi.",
+            };
+        }
+
+        return {
+            transition: `${leak.from}→${leak.to}`,
+            rate: leak.rate,
+            baseline: leak.baseline,
+            deltaPp: leak.deltaPp,
+            estimatedGap: leak.estimatedGap,
+            severity: leak.deltaPp !== null && leak.deltaPp <= -15
+                ? "CRITICAL"
+                : leak.deltaPp !== null && leak.deltaPp <= -5
+                    ? "WARNING"
+                    : null,
+            trackingState,
+            impactMinor: null,
+            impactCaption: leak.estimatedGap === null ? null : leakageCaption(leak.estimatedGap),
+            note: null,
+        };
+    }
+
+    async getStageDetail(tenantId: string, query: StageDetailQuery): Promise<StageDetailResponse> {
+        const account = await requireAccountScope(tenantId, query.accountId);
+
+        const objectiveGroup = stageChannel(query.stageKey);
+        if (objectiveGroup === null) throw new BadRequestError("Tahap funnel tidak dikenal");
+        const definition = FUNNEL_STAGES[objectiveGroup].find((stage) => stage.key === query.stageKey);
+        if (definition === undefined) throw new BadRequestError("Tahap funnel tidak dikenal");
+
+        const period = this.resolvePeriod(account, query);
+        const trackingState = trackingStateOf(await this.analyticsRepo.getTrackingSummary(query.accountId));
+        const funnel = await this.loadFunnel({
+            accountId: query.accountId,
+            objectiveGroup,
+            start: period.start,
+            end: period.end,
+            prevStart: period.prevStart,
+            prevEnd: period.prevEnd,
+            trackingState,
+        });
+
+        const dates = dateRange(period.since, period.until);
+        const byDate = await this.dailyStageByDate({
+            accountId: query.accountId,
+            start: period.start,
+            end: period.end,
+            objectiveGroup,
+            definition,
+        });
+
+        const daily = dates.map((date) => ({date, value: byDate.get(date) ?? 0}));
+
+        const comparisonTable: StageComparisonRow[] = FUNNEL_STAGES[objectiveGroup].map((stage, index) => {
+            const current = funnel.stages[index].value;
+            const previous = funnel.previousStages[index].value;
+            const incoming = index === 0 ? null : funnel.pairs[index - 1];
+
+            return {
+                stageKey: stage.key,
+                label: stage.label,
+                current,
+                previous,
+                changePct: percentChange(current, previous),
+                conversionRate: incoming?.rate ?? null,
+                status: incoming?.status ?? "normal",
+            };
+        });
+
+        const response: StageDetailResponse = {
+            stageKey: definition.key,
+            label: definition.label,
+            objectiveGroup,
+            period: {since: period.since, until: period.until, days: period.days},
+            previousPeriod: {since: period.previousSince, until: period.previousUntil},
+            daily,
+            comparisonTable,
+            sample: funnel.sample,
+        };
+
+        const note = this.funnelNote(trackingState, funnel.pairs);
+        if (note !== undefined) response.note = note;
+
+        return response;
+    }
+
+    /** Shared by all three endpoints: the two periods of counts plus the derived pairs. */
+    private async loadFunnel(params: {
+        accountId: string;
+        campaignId?: string;
+        objectiveGroup: FunnelObjectiveGroup;
+        start: Date;
+        end: Date;
+        prevStart: Date;
+        prevEnd: Date;
+        trackingState: TrackingState;
+    }): Promise<{
+        stages: {key: FunnelStageKey; value: number}[];
+        previousStages: {key: FunnelStageKey; value: number}[];
+        pairs: FunnelPair[];
+        sample: SampleBlock;
+    }> {
+        const {accountId, campaignId, objectiveGroup, start, end, prevStart, prevEnd, trackingState} = params;
+
+        const [current, previous, leadStages, previousLeadStages] = await Promise.all([
+            this.analyticsRepo.getFunnelCounts(accountId, start, end, campaignId, objectiveGroup),
+            this.analyticsRepo.getFunnelCounts(accountId, prevStart, prevEnd, campaignId, objectiveGroup),
+            this.analyticsRepo.getLeadStageCounts(accountId, start, end, campaignId),
+            this.analyticsRepo.getLeadStageCounts(accountId, prevStart, prevEnd, campaignId),
+        ]);
+
+        const toCounts = (
+            meta: typeof current,
+            leads: typeof leadStages
+        ): FunnelCountsLike => ({
+            impressions: meta.impressions,
+            linkClicks: meta.linkClicks,
+            messagingStarted: meta.messagingStarted,
+            lpv: meta.lpv,
+            viewContent: meta.viewContent,
+            addToCart: meta.addToCart,
+            purchase: meta.purchase,
+            observed: leads.observed,
+            replied: leads.replied,
+            qualified: leads.qualified,
+            closed: leads.closed,
+        });
+
+        const currentCounts = toCounts(current, leadStages);
+        const previousCounts = toCounts(previous, previousLeadStages);
+        const definitions = FUNNEL_STAGES[objectiveGroup];
+
+        const stages = definitions.map((definition) => ({key: definition.key, value: definition.read(currentCounts)}));
+        const previousStages = definitions.map((definition) => ({
+            key: definition.key,
+            value: definition.read(previousCounts),
+        }));
+
+        return {
+            stages,
+            previousStages,
+            pairs: buildFunnelPairs(stages, previousStages, trackingState),
+            sample: {
+                n: stages[0].value,
+                denominator: 100,
+                eligible: stages[0].value >= 100,
+                gate: "≥ 100 tayangan",
+            },
+        };
+    }
+
+    /**
+     * Zero-fills nothing: only dates with rows are returned, the caller fills the gaps. The stage
+     * reader is reused so the daily series and the funnel totals agree by construction.
+     */
+    private async dailyStageByDate(params: {
+        accountId: string;
+        start: Date;
+        end: Date;
+        objectiveGroup: FunnelObjectiveGroup;
+        definition: StageDefinition;
+    }): Promise<Map<string, number>> {
+        const {accountId, start, end, objectiveGroup, definition} = params;
+        const byDate = new Map<string, number>();
+
+        if (definition.source === "meta") {
+            const rows = await this.analyticsRepo.getDailyMetaStages(accountId, start, end, objectiveGroup);
+            for (const row of rows) {
+                byDate.set(row.date, definition.read({...EMPTY_FUNNEL_COUNTS, ...row}));
+            }
+        } else {
+            const rows = await this.analyticsRepo.getDailyLeadStages(accountId, start, end);
+            for (const row of rows) {
+                byDate.set(row.date, definition.read({...EMPTY_FUNNEL_COUNTS, ...row}));
+            }
+        }
+
+        return byDate;
+    }
+
+    private funnelNote(trackingState: TrackingState, pairs: FunnelPair[]): string | undefined {
+        if (trackingState !== "up_to_date") {
+            return "Status tracking belum terkini sehingga seluruh transisi ditandai belum layak dibandingkan.";
+        }
+        if (pairs.every((pair) => !pair.eligible)) {
+            return "Cakupan belum cukup untuk membandingkan konversi.";
+        }
+        return undefined;
+    }
+
+    private resolvePeriod(account: {timezoneName: string}, query: {since?: string; until?: string}): {
+        since: string;
+        until: string;
+        days: number;
+        previousSince: string;
+        previousUntil: string;
+        start: Date;
+        end: Date;
+        prevStart: Date;
+        prevEnd: Date;
+    } {
+        const until = query.until ?? todayInZone(account.timezoneName);
+        const since = query.since ?? addDays(until, -(DEFAULT_PERIOD_DAYS - 1));
+        if (since > until) {
+            throw new BadRequestError("Rentang tanggal tidak valid");
+        }
+
+        const days = dayCount(since, until);
+        const previousUntil = addDays(since, -1);
+        const previousSince = addDays(previousUntil, -(days - 1));
+
+        return {
+            since,
+            until,
+            days,
+            previousSince,
+            previousUntil,
+            start: startOfDayUtc(since),
+            end: endOfDayUtc(until),
+            prevStart: startOfDayUtc(previousSince),
+            prevEnd: endOfDayUtc(previousUntil),
         };
     }
 }

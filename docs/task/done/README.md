@@ -12,3 +12,4 @@ Daftar fitur backend yang telah selesai diimplementasikan dan diuji:
 | 06 | **Repository Analitik & Ingest** | [`06-database-repositories-analytics.md`](./06-database-repositories-analytics.md) | 2026-11-21 | Selesai & Teruji ✅ |
 | 07 | **View Insight Metrics** | [`07-insight-metrics-view.md`](./07-insight-metrics-view.md) | 2026-11-21 | Selesai & Teruji ✅ |
 | 08 | **Overview & Summary Analytics** | [`08-overview-summary.md`](./08-overview-summary.md) | 2026-11-22 | Selesai & Teruji ✅ |
+| 09 | **Funnel Intelligence & Leakage Detection** | [`09-funnel-intelligence.md`](./09-funnel-intelligence.md) | 2026-11-21 | Selesai & Teruji ✅ |

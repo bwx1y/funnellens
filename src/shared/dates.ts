@@ -24,6 +24,14 @@ export function dayCount(since: string, until: string): number {
     return dayDiff(since, until) + 1;
 }
 
+/** Inclusive list of UTC dates from `since` to `until`; empty when `since` is after `until`. */
+export function dateRange(since: string, until: string): string[] {
+    const days = dayCount(since, until);
+    if (days <= 0) return [];
+
+    return Array.from({length: days}, (_, index) => addDays(since, index));
+}
+
 /**
  * Today's date in the account timezone. An unknown IANA name from Meta must not fail the request,
  * so the UTC date is the fallback.

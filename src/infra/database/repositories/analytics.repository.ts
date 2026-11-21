@@ -2,6 +2,7 @@ import {DatabaseRepository} from "./base.repository";
 import {PixelSourceEntity} from "@db/schema/ads/pixel-source.entity";
 import {eq, sql} from "drizzle-orm";
 import {ATTRIBUTION_WINDOW} from "./ad-insight-daily.repository";
+import type {FunnelObjectiveGroup} from "@shared/funnel";
 
 export interface FunnelCounts {
     spendMinor: number;
@@ -103,6 +104,25 @@ interface DailyQualifiedRow {
     date: string;
     leads: string;
     qualified: string;
+}
+
+interface DailyMetaStageRow {
+    date: string;
+    impressions: string;
+    link_clicks: string;
+    messaging_started: string;
+    lpv: string;
+    view_content: string;
+    add_to_cart: string;
+    purchase: string;
+}
+
+interface DailyLeadStageRow {
+    date: string;
+    observed: string;
+    replied: string;
+    qualified: string;
+    closed: string;
 }
 
 interface CampaignLeadRow {
@@ -276,6 +296,81 @@ export class AnalyticsRepository extends DatabaseRepository {
             date: row.date,
             leads: Number(row.leads),
             qualified: Number(row.qualified),
+        }));
+    }
+
+    /**
+     * One row per UTC date for the stage-detail trend. Same view and scope as `getFunnelCounts`, so
+     * the daily numbers add up to the funnel totals.
+     */
+    async getDailyMetaStages(
+        accountId: string,
+        since: Date,
+        until: Date,
+        objectiveGroup: FunnelObjectiveGroup
+    ): Promise<{
+        date: string;
+        impressions: number;
+        linkClicks: number;
+        messagingStarted: number;
+        lpv: number;
+        viewContent: number;
+        addToCart: number;
+        purchase: number;
+    }[]> {
+        const rows = await this.database.execute(sql`
+            select i.date::text                            as date,
+                   coalesce(sum(i.impressions), 0)         as impressions,
+                   coalesce(sum(i.inline_link_clicks), 0)  as link_clicks,
+                   coalesce(sum(i.leads), 0)               as messaging_started,
+                   coalesce(sum(i.lpv), 0)                 as lpv,
+                   coalesce(sum(i.view_content), 0)        as view_content,
+                   coalesce(sum(i.add_to_cart), 0)         as add_to_cart,
+                   coalesce(sum(i.purchases), 0)           as purchase
+            from ad_insight_metrics i
+            where ${this.insightScope(accountId, since, until, {objectiveGroup})}
+            group by i.date
+            order by i.date asc
+        `) as unknown as DailyMetaStageRow[];
+
+        return rows.map((row) => ({
+            date: row.date,
+            impressions: Number(row.impressions),
+            linkClicks: Number(row.link_clicks),
+            messagingStarted: Number(row.messaging_started),
+            lpv: Number(row.lpv),
+            viewContent: Number(row.view_content),
+            addToCart: Number(row.add_to_cart),
+            purchase: Number(row.purchase),
+        }));
+    }
+
+    /** One row per UTC date; the cohort filter matches `getLeadStageCounts` exactly. */
+    async getDailyLeadStages(
+        accountId: string,
+        since: Date,
+        until: Date
+    ): Promise<{date: string; observed: number; replied: number; qualified: number; closed: number}[]> {
+        const rows = await this.database.execute(sql`
+            select (l.first_seen_at at time zone 'UTC')::date::text                       as date,
+                   count(*)                                                               as observed,
+                   count(*) filter (where l.first_replied_at is not null)                  as replied,
+                   count(*) filter (where l.stage in ('QUALIFIED', 'CLOSING'))             as qualified,
+                   count(*) filter (where l.stage = 'CLOSED' or l.closed_at is not null)   as closed
+            from leads l
+            where l.account_id = ${accountId}
+              and l.first_seen_at >= ${since.toISOString()}::timestamptz
+              and l.first_seen_at <= ${until.toISOString()}::timestamptz
+            group by 1
+            order by 1 asc
+        `) as unknown as DailyLeadStageRow[];
+
+        return rows.map((row) => ({
+            date: row.date,
+            observed: Number(row.observed),
+            replied: Number(row.replied),
+            qualified: Number(row.qualified),
+            closed: Number(row.closed),
         }));
     }
 

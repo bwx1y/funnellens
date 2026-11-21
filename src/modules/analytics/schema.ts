@@ -17,6 +17,55 @@ export const AnalyticsSchema = {
             description: "Optional campaign filter",
         })),
     }),
+    funnel: t.Object({
+        accountId: t.String({
+            description: "Meta Ad Account ID",
+        }),
+        since: t.Optional(t.String({
+            pattern: "^\\d{4}-\\d{2}-\\d{2}$",
+            description: "Start date (YYYY-MM-DD), defaults to 29 days before until",
+        })),
+        until: t.Optional(t.String({
+            pattern: "^\\d{4}-\\d{2}-\\d{2}$",
+            description: "End date (YYYY-MM-DD), defaults to today in the account timezone",
+        })),
+        campaignId: t.Optional(t.String({
+            description: "Optional campaign filter",
+        })),
+        objectiveGroup: t.Optional(t.Union([t.Literal("wa"), t.Literal("web")], {
+            default: "wa",
+            description: "Funnel channel: WhatsApp or Website",
+        })),
+    }),
+    leakage: t.Object({
+        accountId: t.String({
+            description: "Meta Ad Account ID",
+        }),
+        since: t.Optional(t.String({
+            pattern: "^\\d{4}-\\d{2}-\\d{2}$",
+            description: "Start date (YYYY-MM-DD), defaults to 29 days before until",
+        })),
+        until: t.Optional(t.String({
+            pattern: "^\\d{4}-\\d{2}-\\d{2}$",
+            description: "End date (YYYY-MM-DD), defaults to today in the account timezone",
+        })),
+    }),
+    stageDetail: t.Object({
+        accountId: t.String({
+            description: "Meta Ad Account ID",
+        }),
+        stageKey: t.String({
+            description: "Funnel stage key (impressions, link_clicks, messaging_started, observed, replied, qualified, closed, lpv, view_content, add_to_cart, purchase)",
+        }),
+        since: t.Optional(t.String({
+            pattern: "^\\d{4}-\\d{2}-\\d{2}$",
+            description: "Start date (YYYY-MM-DD), defaults to 29 days before until",
+        })),
+        until: t.Optional(t.String({
+            pattern: "^\\d{4}-\\d{2}-\\d{2}$",
+            description: "End date (YYYY-MM-DD), defaults to today in the account timezone",
+        })),
+    }),
 }
 
 export type AnalyticsSchema = {

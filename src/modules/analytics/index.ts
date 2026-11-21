@@ -22,3 +22,27 @@ export const AnalyticsController = new Elysia({
                 summary: "Get overview summary (KPI cards, health, trend, campaigns)"
             }
         })
+    .get("/funnel",
+        async ({user, query, analyticsService}) => analyticsService.getFunnel(user.tenantId, query),
+        {
+            query: AnalyticsSchema.funnel,
+            detail: {
+                summary: "Get funnel stages per channel with period-over-period pairs"
+            }
+        })
+    .get("/funnel/stage-detail",
+        async ({user, query, analyticsService}) => analyticsService.getStageDetail(user.tenantId, query),
+        {
+            query: AnalyticsSchema.stageDetail,
+            detail: {
+                summary: "Get daily trend and comparison table for one funnel stage"
+            }
+        })
+    .get("/leakage",
+        async ({user, query, analyticsService}) => analyticsService.getLeakage(user.tenantId, query),
+        {
+            query: AnalyticsSchema.leakage,
+            detail: {
+                summary: "Get the weakest eligible funnel transition"
+            }
+        })
