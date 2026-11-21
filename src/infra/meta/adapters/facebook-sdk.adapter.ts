@@ -14,6 +14,7 @@ import type {
     MetaVideoDto,
 } from "../types";
 import {logger} from "@shared/logger";
+import {Config} from "@/config";
 
 interface SdkCursorItem {
     _data?: Record<string, unknown>;
@@ -23,6 +24,15 @@ interface SdkCursorItem {
 interface SdkCursor extends Array<SdkCursorItem> {
     hasNext(): boolean;
     next(): Promise<SdkCursor>;
+}
+
+/** Meta returns hourly buckets like `"14:00:00 - 14:59:59"`; the leading hour is the bucket. */
+function parseHourOfDay(value: unknown): number | null {
+    if (value == null) return null;
+    const match = /^(\d{1,2})/.exec(String(value).trim());
+    if (!match) return null;
+    const hour = Number(match[1]);
+    return hour >= 0 && hour <= 23 ? hour : null;
 }
 
 export class FacebookSdkAdapter implements IMetaAdsAdapter {
@@ -161,6 +171,7 @@ export class FacebookSdkAdapter implements IMetaAdsAdapter {
             bizSdk.AdSet.Fields.status,
             bizSdk.AdSet.Fields.effective_status,
             bizSdk.AdSet.Fields.optimization_goal,
+            "destination_type",
             bizSdk.AdSet.Fields.billing_event,
             bizSdk.AdSet.Fields.bid_strategy,
             bizSdk.AdSet.Fields.bid_amount,
@@ -185,6 +196,7 @@ export class FacebookSdkAdapter implements IMetaAdsAdapter {
             status: s.status ? String(s.status) : null,
             effectiveStatus: s.effective_status ? String(s.effective_status) : null,
             optimizationGoal: s.optimization_goal ? String(s.optimization_goal) : null,
+            destinationType: s.destination_type ? String(s.destination_type) : null,
             billingEvent: s.billing_event ? String(s.billing_event) : null,
             bidStrategy: s.bid_strategy ? String(s.bid_strategy) : null,
             bidAmountMinor: s.bid_amount ? Number(s.bid_amount) : null,
@@ -346,6 +358,8 @@ export class FacebookSdkAdapter implements IMetaAdsAdapter {
             "video_p75_watched_actions",
             "video_p100_watched_actions",
             "video_avg_time_watched_actions",
+            "action_report_time",
+            "video_3_sec_watched_actions",
         ];
 
         const params = {
@@ -447,6 +461,9 @@ export class FacebookSdkAdapter implements IMetaAdsAdapter {
                 videoP75WatchedActions: videoP75,
                 videoP100WatchedActions: videoP100,
                 videoAvgTimeWatchedSeconds: videoAvgTime != null ? String(videoAvgTime) : null,
+                graphVersion: Config.meta.apiVersion,
+                actionReportTime: row.action_report_time ? String(row.action_report_time) : "impression",
+                video3SecWatchedActions: extractVideoMetric(row.video_3_sec_watched_actions),
                 isFinal,
                 extractedActions,
             };
@@ -520,6 +537,97 @@ export class FacebookSdkAdapter implements IMetaAdsAdapter {
                 publisherPlatform: pubPlatform,
                 platformPosition: platPosition,
                 impressionDevice: impDevice,
+                hourOfDay: null,
+                age: null,
+                gender: null,
+                country: null,
+                region: null,
+                breakdownHash,
+                spendMinor,
+                impressions: Number(row.impressions ?? 0),
+                reach: row.reach != null ? Number(row.reach) : null,
+                clicks: Number(row.clicks ?? 0),
+                inlineLinkClicks: row.inline_link_clicks != null ? Number(row.inline_link_clicks) : null,
+                actions: row.actions ?? null,
+                actionValues: row.action_values ?? null,
+            };
+        });
+    }
+
+    async getHourlyAdBreakdowns(
+        accessToken: string,
+        accountId: string,
+        options: {
+            since: string;
+            until: string;
+            currencyOffset?: number;
+        }
+    ): Promise<MetaAdInsightBreakdownDailyDto[]> {
+        this.initApi(accessToken);
+        const normalizedAccountId = accountId.startsWith("act_") ? accountId : `act_${accountId}`;
+        const account = new bizSdk.AdAccount(normalizedAccountId);
+        const currencyOffset = options.currencyOffset ?? 100;
+
+        const fields = [
+            "account_id",
+            "campaign_id",
+            "adset_id",
+            "ad_id",
+            "date_start",
+            "date_stop",
+            "spend",
+            "impressions",
+            "reach",
+            "clicks",
+            "inline_link_clicks",
+            "actions",
+            "action_values",
+        ];
+
+        const params = {
+            level: "ad",
+            time_increment: 1,
+            time_range: {since: options.since, until: options.until},
+            action_attribution_windows: ["7d_click"],
+            breakdowns: [
+                "publisher_platform",
+                "platform_position",
+                "impression_device",
+                "hourly_stats_aggregated_by_advertiser_time_zone",
+            ],
+        };
+
+        const rawRows = await this.fetchAllSdk(
+            (f, p) => account.getInsights(f, p) as Promise<SdkCursor>,
+            fields,
+            params
+        );
+
+        return rawRows.map((row) => {
+            const rawSpend = Number(row.spend ?? 0);
+            const spendMinor = Math.round(rawSpend * currencyOffset);
+            const dateStr = String(row.date_start ?? row.date_stop ?? options.since);
+            const pubPlatform = row.publisher_platform ? String(row.publisher_platform) : null;
+            const platPosition = row.platform_position ? String(row.platform_position) : null;
+            const impDevice = row.impression_device ? String(row.impression_device) : null;
+            const hourOfDay = parseHourOfDay(row.hourly_stats_aggregated_by_advertiser_time_zone);
+
+            const hashInput = `${pubPlatform ?? ""}|${platPosition ?? ""}|${impDevice ?? ""}|${hourOfDay ?? ""}`;
+            const breakdownHash = createHash("sha256").update(hashInput).digest("hex").slice(0, 32);
+
+            return {
+                accountId: normalizedAccountId,
+                level: "ad",
+                entityId: String(row.ad_id),
+                campaignId: row.campaign_id ? String(row.campaign_id) : null,
+                adsetId: row.adset_id ? String(row.adset_id) : null,
+                adId: String(row.ad_id),
+                date: dateStr,
+                attributionWindow: "7d_click",
+                publisherPlatform: pubPlatform,
+                platformPosition: platPosition,
+                impressionDevice: impDevice,
+                hourOfDay,
                 age: null,
                 gender: null,
                 country: null,

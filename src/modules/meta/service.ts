@@ -7,13 +7,16 @@ import {AdSetRepository} from "@db/repositories/ad-set.repository";
 import {AdCreativeRepository} from "@db/repositories/ad-creative.repository";
 import {AdRepository} from "@db/repositories/ad.repository";
 import {SyncRunRepository} from "@db/repositories/sync-run.repository";
-import {AdInsightRepository} from "@db/repositories/ad-insight.repository";
+import type {UpsertInsightDailyParams} from "@db/repositories/ad-insight-daily.repository";
+import type {InsertAdInsightBreakdownDaily} from "@db/repositories/ad-insight-breakdown.repository";
+import {InsightStagingRepository} from "@db/repositories/insight-staging.repository";
 import {BadRequestError, InternalError, NotFoundError, UnauthorizedError} from "@shared/errors";
 import {JwtUtil} from "@shared/jwt";
 import {logger} from "@shared/logger";
 import type {MetaSchema} from "@/modules/meta/schema";
 import type {IMetaAdsAdapter} from "@infra/meta/base.meta";
 import {FacebookSdkAdapter} from "@infra/meta/adapters/facebook-sdk.adapter";
+import {deriveObjectiveGroup} from "@infra/meta/objective-group";
 
 const GRAPH_URL = "https://graph.facebook.com";
 const OAUTH_DIALOG_URL = "https://www.facebook.com";
@@ -101,6 +104,7 @@ interface GraphAdSet {
     status?: string;
     effective_status?: string;
     optimization_goal?: string;
+    destination_type?: string;
     billing_event?: string;
     bid_strategy?: string;
     bid_amount?: string;
@@ -165,7 +169,7 @@ export class MetaService {
         private readonly syncRunRepository = new SyncRunRepository(),
         private readonly customRequest?: MetaRequester,
         private readonly metaAdapter: IMetaAdsAdapter = new FacebookSdkAdapter(),
-        private readonly adInsightRepository = new AdInsightRepository(),
+        private readonly insightStagingRepository = new InsightStagingRepository(),
     ) {}
 
     async authorizationUrl(user: { iss: string; tenantId: string }): Promise<{ url: string; expiresIn: number }> {
@@ -450,7 +454,7 @@ export class MetaService {
         }
 
         const normalizedAccountId = await this.resolveTargetAccountId(user.tenantId, body?.accountId);
-        const syncRun = await this.syncRunRepository.start(normalizedAccountId, "master");
+        const syncRun = await this.syncRunRepository.create({accountId: normalizedAccountId, resource: "master"});
 
         try {
             logger.info({accountId: normalizedAccountId}, "Starting Meta master metadata sync");
@@ -489,7 +493,7 @@ export class MetaService {
                 const rawAdSets = await this.fetchAll<GraphAdSet>(
                     `/${normalizedAccountId}/adsets`,
                     {
-                        fields: "id,name,campaign_id,status,effective_status,optimization_goal,billing_event,bid_strategy,bid_amount,daily_budget,lifetime_budget,targeting,start_time,end_time,created_time,updated_time",
+                        fields: "id,name,campaign_id,status,effective_status,optimization_goal,destination_type,billing_event,bid_strategy,bid_amount,daily_budget,lifetime_budget,targeting,start_time,end_time,created_time,updated_time",
                     },
                     connection.accessToken
                 );
@@ -500,6 +504,7 @@ export class MetaService {
                     status: s.status ?? null,
                     effectiveStatus: s.effective_status ?? null,
                     optimizationGoal: s.optimization_goal ?? null,
+                    destinationType: s.destination_type ?? null,
                     billingEvent: s.billing_event ?? null,
                     bidStrategy: s.bid_strategy ?? null,
                     bidAmountMinor: s.bid_amount ? Number(s.bid_amount) : null,
@@ -640,6 +645,7 @@ export class MetaService {
                 status: s.status,
                 effectiveStatus: s.effectiveStatus,
                 optimizationGoal: s.optimizationGoal,
+                objectiveGroup: deriveObjectiveGroup(s.optimizationGoal, s.destinationType),
                 billingEvent: s.billingEvent,
                 bidStrategy: s.bidStrategy,
                 bidAmountMinor: s.bidAmountMinor,
@@ -695,7 +701,7 @@ export class MetaService {
             await this.adRepository.upsertBatch(ads);
 
             const totalRows = campaigns.length + adSets.length + creatives.length + ads.length;
-            await this.syncRunRepository.finish(syncRun.id, totalRows);
+            await this.syncRunRepository.complete(syncRun.id, totalRows);
 
             logger.info({accountId: normalizedAccountId, totalRows}, "Meta master metadata sync completed");
 
@@ -742,7 +748,12 @@ export class MetaService {
         const until = body?.until ?? today.toISOString().slice(0, 10);
         const includeBreakdowns = body?.includeBreakdowns ?? true;
 
-        const syncRun = await this.syncRunRepository.start(normalizedAccountId, "insights");
+        const syncRun = await this.syncRunRepository.create({
+            accountId: normalizedAccountId,
+            resource: "insights",
+            rangeSince: since,
+            rangeUntil: until,
+        });
 
         try {
             logger.info({accountId: normalizedAccountId, since, until}, "Starting Meta ads insights sync");
@@ -754,49 +765,47 @@ export class MetaService {
                 {since, until, currency, currencyOffset}
             );
 
-            // Transform to repository format
-            const insightParams = dailyData.map((d) => ({
-                insight: {
-                    accountId: d.accountId,
-                    level: d.level,
-                    entityId: d.entityId,
-                    campaignId: d.campaignId,
-                    adsetId: d.adsetId,
-                    adId: d.adId,
-                    date: d.date,
-                    attributionWindow: d.attributionWindow,
-                    currency: d.currency,
-                    currencyOffset: d.currencyOffset,
-                    spendMinor: d.spendMinor,
-                    impressions: d.impressions,
-                    reach: d.reach,
-                    frequency: d.frequency,
-                    clicks: d.clicks,
-                    inlineLinkClicks: d.inlineLinkClicks,
-                    uniqueClicks: d.uniqueClicks,
-                    ctr: d.ctr,
-                    cpcMinor: d.cpcMinor,
-                    cpmMinor: d.cpmMinor,
-                    actions: d.actions,
-                    actionValues: d.actionValues,
-                    costPerActionType: d.costPerActionType,
-                    videoPlayActions: d.videoPlayActions,
-                    video30SecWatchedActions: d.video30SecWatchedActions,
-                    videoThruplayWatchedActions: d.videoThruplayWatchedActions,
-                    videoP25WatchedActions: d.videoP25WatchedActions,
-                    videoP50WatchedActions: d.videoP50WatchedActions,
-                    videoP75WatchedActions: d.videoP75WatchedActions,
-                    videoP100WatchedActions: d.videoP100WatchedActions,
-                    videoAvgTimeWatchedSeconds: d.videoAvgTimeWatchedSeconds,
-                    isFinal: d.isFinal,
-                },
+            const dailyRows: UpsertInsightDailyParams[] = dailyData.map((d) => ({
+                accountId: d.accountId,
+                level: d.level,
+                entityId: d.entityId,
+                campaignId: d.campaignId,
+                adsetId: d.adsetId,
+                adId: d.adId,
+                date: d.date,
+                attributionWindow: d.attributionWindow,
+                currency: d.currency,
+                currencyOffset: d.currencyOffset,
+                spendMinor: d.spendMinor,
+                impressions: d.impressions,
+                reach: d.reach,
+                frequency: d.frequency,
+                clicks: d.clicks,
+                inlineLinkClicks: d.inlineLinkClicks,
+                uniqueClicks: d.uniqueClicks,
+                ctr: d.ctr,
+                cpcMinor: d.cpcMinor,
+                cpmMinor: d.cpmMinor,
+                actionValues: d.actionValues,
+                costPerActionType: d.costPerActionType,
+                videoPlayActions: d.videoPlayActions,
+                video30SecWatchedActions: d.video30SecWatchedActions,
+                videoThruplayWatchedActions: d.videoThruplayWatchedActions,
+                videoP25WatchedActions: d.videoP25WatchedActions,
+                videoP50WatchedActions: d.videoP50WatchedActions,
+                videoP75WatchedActions: d.videoP75WatchedActions,
+                videoP100WatchedActions: d.videoP100WatchedActions,
+                videoAvgTimeWatchedSeconds: d.videoAvgTimeWatchedSeconds,
+                graphVersion: d.graphVersion,
+                actionReportTime: d.actionReportTime,
+                video3SecWatchedActions: d.video3SecWatchedActions,
+                isFinal: d.isFinal,
                 actions: d.extractedActions,
             }));
 
-            const insightsCount = await this.adInsightRepository.upsertDailyInsights(insightParams);
+            await this.insightStagingRepository.write(syncRun.id, "insight_daily", dailyRows);
 
             // 2. Fetch daily breakdowns if requested
-            let breakdownsCount = 0;
             if (includeBreakdowns) {
                 const breakdownData = await this.metaAdapter.getDailyAdBreakdowns(
                     connection.accessToken,
@@ -804,7 +813,7 @@ export class MetaService {
                     {since, until, currencyOffset}
                 );
 
-                const breakdownRows = breakdownData.map((b) => ({
+                const breakdownRows: InsertAdInsightBreakdownDaily[] = breakdownData.map((b) => ({
                     accountId: b.accountId,
                     level: b.level,
                     entityId: b.entityId,
@@ -816,6 +825,7 @@ export class MetaService {
                     publisherPlatform: b.publisherPlatform,
                     platformPosition: b.platformPosition,
                     impressionDevice: b.impressionDevice,
+                    hourOfDay: b.hourOfDay,
                     age: b.age,
                     gender: b.gender,
                     country: b.country,
@@ -830,13 +840,22 @@ export class MetaService {
                     actionValues: b.actionValues,
                 }));
 
-                breakdownsCount = await this.adInsightRepository.upsertBreakdowns(breakdownRows);
+                await this.insightStagingRepository.write(syncRun.id, "insight_breakdown", breakdownRows);
             }
 
-            const totalRows = insightsCount + breakdownsCount;
-            await this.syncRunRepository.finish(syncRun.id, totalRows);
+            // 3. Publish the whole slice atomically (rows + sync run status)
+            const published = await this.insightStagingRepository.publishCompleteSlice({
+                runId: syncRun.id,
+                accountId: normalizedAccountId,
+                since,
+                until,
+                kinds: includeBreakdowns ? ["insight_daily", "insight_breakdown"] : ["insight_daily"],
+            });
 
-            logger.info({accountId: normalizedAccountId, totalRows, insightsCount, breakdownsCount}, "Meta ads insights sync completed");
+            logger.info(
+                {accountId: normalizedAccountId, published},
+                "Meta ads insights sync completed"
+            );
 
             return {
                 message: "Ads insights synchronized successfully",
@@ -844,15 +863,114 @@ export class MetaService {
                 since,
                 until,
                 counts: {
-                    dailyInsights: insightsCount,
-                    breakdowns: breakdownsCount,
-                    total: totalRows,
+                    dailyInsights: published.dailyInsights,
+                    breakdowns: published.breakdowns,
+                    total: published.total,
                 },
             };
         } catch (error) {
             const errMessage = error instanceof Error ? error.message : String(error);
+            await this.insightStagingRepository.cleanup(syncRun.id).catch((cleanupError) => {
+                logger.warn({cleanupError, runId: syncRun.id}, "Failed to clean insight staging");
+            });
             await this.syncRunRepository.fail(syncRun.id, errMessage);
             logger.error({accountId: normalizedAccountId, error: errMessage}, "Meta ads insights sync failed");
+            throw error;
+        }
+    }
+
+    async syncHourlyBreakdowns(
+        user: { iss: string; tenantId: string },
+        body?: { accountId?: string; since?: string; until?: string } | null
+    ) {
+        const connection = await this.metaConnectionRepository.findByUserId(user.iss);
+        if (connection == null) {
+            throw new UnauthorizedError("Meta connection not found. Please connect your Meta account first.");
+        }
+
+        if (connection.expiresAt && connection.expiresAt.getTime() <= Date.now()) {
+            throw new UnauthorizedError("Meta access token has expired. Please reconnect.");
+        }
+
+        const normalizedAccountId = await this.resolveTargetAccountId(user.tenantId, body?.accountId);
+        const account = await this.adAccountRepository.findById(normalizedAccountId, user.tenantId);
+        const currencyOffset = account?.currencyOffset ?? 100;
+
+        const until = body?.until ?? new Date().toISOString().slice(0, 10);
+        const since = body?.since ?? new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+
+        const syncRun = await this.syncRunRepository.create({
+            accountId: normalizedAccountId,
+            resource: "insights-hourly",
+            rangeSince: since,
+            rangeUntil: until,
+        });
+
+        try {
+            logger.info({accountId: normalizedAccountId, since, until}, "Starting Meta hourly breakdown sync");
+
+            const hourlyData = await this.metaAdapter.getHourlyAdBreakdowns(
+                connection.accessToken,
+                normalizedAccountId,
+                {since, until, currencyOffset}
+            );
+
+            const rows: InsertAdInsightBreakdownDaily[] = hourlyData.map((b) => ({
+                accountId: b.accountId,
+                level: b.level,
+                entityId: b.entityId,
+                campaignId: b.campaignId,
+                adsetId: b.adsetId,
+                adId: b.adId,
+                date: b.date,
+                attributionWindow: b.attributionWindow,
+                publisherPlatform: b.publisherPlatform,
+                platformPosition: b.platformPosition,
+                impressionDevice: b.impressionDevice,
+                hourOfDay: b.hourOfDay,
+                age: b.age,
+                gender: b.gender,
+                country: b.country,
+                region: b.region,
+                breakdownHash: b.breakdownHash,
+                spendMinor: b.spendMinor,
+                impressions: b.impressions,
+                reach: b.reach,
+                clicks: b.clicks,
+                inlineLinkClicks: b.inlineLinkClicks,
+                actions: b.actions,
+                actionValues: b.actionValues,
+            }));
+
+            await this.insightStagingRepository.write(syncRun.id, "insight_breakdown_hourly", rows);
+
+            const published = await this.insightStagingRepository.publishCompleteSlice({
+                runId: syncRun.id,
+                accountId: normalizedAccountId,
+                since,
+                until,
+                kinds: ["insight_breakdown_hourly"],
+            });
+
+            logger.info({accountId: normalizedAccountId, published}, "Meta hourly breakdown sync completed");
+
+            return {
+                message: "Hourly breakdowns synchronized successfully",
+                accountId: normalizedAccountId,
+                since,
+                until,
+                counts: {
+                    breakdowns: published.breakdowns,
+                    total: published.total,
+                },
+            };
+        } catch (error) {
+            const errMessage = error instanceof Error ? error.message : String(error);
+            await this.insightStagingRepository.cleanup(syncRun.id).catch((cleanupError) => {
+                logger.warn({cleanupError, runId: syncRun.id}, "Failed to clean insight staging");
+            });
+            await this.syncRunRepository.fail(syncRun.id, errMessage);
+            logger.error({accountId: normalizedAccountId, error: errMessage}, "Meta hourly breakdown sync failed");
             throw error;
         }
     }

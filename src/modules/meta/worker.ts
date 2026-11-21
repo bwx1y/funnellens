@@ -2,6 +2,7 @@ import {WorkerManager, type Job} from "@infra/queue";
 import {
     META_SYNC_QUEUE_NAME,
     type MetaSyncJobData,
+    type MetaSyncHourlyBreakdownsJobPayload,
     type MetaSyncJobName,
     type MetaSyncTrailingJobPayload,
 } from "./queue";
@@ -27,6 +28,8 @@ export class MetaSyncWorkerProcessor {
                 await this.handleTrailingSync(job.data as MetaSyncTrailingJobPayload);
             } else if (job.name === "sync-master") {
                 await this.handleMasterSync(job.data);
+            } else if (job.name === "sync-hourly-breakdowns") {
+                await this.handleHourlyBreakdownSync(job.data as MetaSyncHourlyBreakdownsJobPayload);
             } else {
                 logger.warn({jobName: job.name}, "Unknown Meta sync job name");
             }
@@ -77,6 +80,19 @@ export class MetaSyncWorkerProcessor {
             await this.metaService.syncInsights(
                 {iss: target.userId, tenantId: target.tenantId},
                 {accountId: target.accountId, since, until, includeBreakdowns: true}
+            );
+        }
+    }
+
+    private async handleHourlyBreakdownSync(data: MetaSyncHourlyBreakdownsJobPayload): Promise<void> {
+        const targets = await this.resolveSyncTargets(data);
+        const until = data.until ?? new Date().toISOString().slice(0, 10);
+        const since = data.since ?? new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+
+        for (const target of targets) {
+            await this.metaService.syncHourlyBreakdowns(
+                {iss: target.userId, tenantId: target.tenantId},
+                {accountId: target.accountId, since, until}
             );
         }
     }

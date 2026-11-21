@@ -19,12 +19,21 @@ export interface MetaSyncMasterJobPayload {
     userId?: string;
 }
 
+export interface MetaSyncHourlyBreakdownsJobPayload {
+    tenantId?: string;
+    accountId?: string;
+    userId?: string;
+    since?: string;
+    until?: string;
+}
+
 export type MetaSyncJobData =
     | MetaSyncDailyJobPayload
     | MetaSyncTrailingJobPayload
-    | MetaSyncMasterJobPayload;
+    | MetaSyncMasterJobPayload
+    | MetaSyncHourlyBreakdownsJobPayload;
 
-export type MetaSyncJobName = "sync-daily" | "re-sync-trailing" | "sync-master";
+export type MetaSyncJobName = "sync-daily" | "re-sync-trailing" | "sync-master" | "sync-hourly-breakdowns";
 
 export const META_SYNC_QUEUE_NAME = "meta-sync";
 
@@ -49,6 +58,14 @@ export class MetaSyncQueue extends QueueManager<MetaSyncJobData, void, MetaSyncJ
             pattern: "15 * * * *",
         }, {
             name: "sync-daily",
+            data: {},
+        });
+
+        // Hourly breakdowns: run every hour at minute 45 (offset from the daily entry to avoid overlap)
+        await this.instance.upsertJobScheduler("sync-hourly-breakdowns", {
+            pattern: "45 * * * *",
+        }, {
+            name: "sync-hourly-breakdowns",
             data: {},
         });
 

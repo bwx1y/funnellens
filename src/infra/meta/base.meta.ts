@@ -36,6 +36,15 @@ export interface IMetaAdsAdapter {
             currencyOffset?: number;
         }
     ): Promise<MetaAdInsightBreakdownDailyDto[]>;
+    getHourlyAdBreakdowns(
+        accessToken: string,
+        accountId: string,
+        options: {
+            since: string;
+            until: string;
+            currencyOffset?: number;
+        }
+    ): Promise<MetaAdInsightBreakdownDailyDto[]>;
     getCustomPeriodMetrics(
         accessToken: string,
         accountId: string,

@@ -32,6 +32,7 @@ export interface MetaAdSetDto {
     status: string | null;
     effectiveStatus: string | null;
     optimizationGoal: string | null;
+    destinationType: string | null;
     billingEvent: string | null;
     bidStrategy: string | null;
     bidAmountMinor: number | null;
@@ -123,6 +124,9 @@ export interface MetaAdInsightDailyDto {
     videoP75WatchedActions: number | null;
     videoP100WatchedActions: number | null;
     videoAvgTimeWatchedSeconds: string | null;
+    graphVersion: string;
+    actionReportTime: string;
+    video3SecWatchedActions: number | null;
     isFinal: boolean;
     extractedActions: MetaAdInsightActionDto[];
 }
@@ -139,6 +143,7 @@ export interface MetaAdInsightBreakdownDailyDto {
     publisherPlatform: string | null;
     platformPosition: string | null;
     impressionDevice: string | null;
+    hourOfDay: number | null;
     age: string | null;
     gender: string | null;
     country: string | null;
