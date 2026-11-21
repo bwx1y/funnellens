@@ -62,6 +62,18 @@ export class WaPhoneRepository extends DatabaseRepository {
         return result ?? null;
     }
 
+    /** One phone row per session; ordered by `phone` so a multi-row session is deterministic. */
+    async findBySessionId(sessionId: string): Promise<(typeof WaPhoneEntity.$inferSelect) | null> {
+        const [result] = await this.database
+            .select()
+            .from(WaPhoneEntity)
+            .where(eq(WaPhoneEntity.sessionId, sessionId))
+            .orderBy(WaPhoneEntity.phone)
+            .limit(1);
+
+        return result ?? null;
+    }
+
     async findAllByTenantId(tenantId: string, sessionId?: string) {
         return this.database
             .select({

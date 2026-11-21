@@ -16,10 +16,3 @@ export type MessageReceived =  {
         name: string
     }
 }
-
-export interface LeadAiResponse {
-    lead_type: "HOT" | "WARM" | "COLD";
-    confidence_score: number;
-    detected_product: string | null;
-    reasoning: string;
-}
