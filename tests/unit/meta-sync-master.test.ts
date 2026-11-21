@@ -9,6 +9,7 @@ import {AdRepository} from "@db/repositories/ad.repository";
 import {SyncRunRepository} from "@db/repositories/sync-run.repository";
 import {BadRequestError} from "@shared/errors";
 import type {IMetaAdsAdapter} from "@infra/meta/base.meta";
+import {deriveObjectiveGroup} from "@infra/meta/objective-group";
 import type {AdAccountEntity} from "@db/schema/ads/ad-account.entity";
 import type {MetaConnectionEntity} from "@db/schema/ads/meta-connection.entity";
 import type {CampaignEntity} from "@db/schema/ads/campaign.entity";
@@ -144,17 +145,19 @@ describe("Meta Master Metadata Sync (fetchAll)", () => {
         } as unknown as AdAccountRepository;
 
         const mockSyncRunRepo = {
-            start: mock(async (accountId: string, resource: string): Promise<SyncRunSelect> => ({
+            create: mock(async (run: {accountId: string; resource: string}): Promise<SyncRunSelect> => ({
                 id: 1,
-                accountId,
-                resource,
+                accountId: run.accountId,
+                resource: run.resource,
                 startedAt: new Date(),
                 finishedAt: null,
                 status: "RUNNING",
                 rowsUpserted: null,
+                rangeSince: null,
+                rangeUntil: null,
                 error: null,
             })),
-            finish: mock(async (): Promise<void> => {}),
+            complete: mock(async (): Promise<void> => {}),
         } as unknown as SyncRunRepository;
 
         const mockCampaignRepo = {
@@ -234,20 +237,22 @@ describe("Meta Master Metadata Sync (fetchAll)", () => {
         let rowsCount = 0;
 
         const mockSyncRunRepo = {
-            start: mock(async (accountId: string, resource: string): Promise<SyncRunSelect> => {
+            create: mock(async (run: {accountId: string; resource: string}): Promise<SyncRunSelect> => {
                 syncRunStarted = true;
                 return {
                     id: 1,
-                    accountId,
-                    resource,
+                    accountId: run.accountId,
+                    resource: run.resource,
                     startedAt: new Date(),
                     finishedAt: null,
                     status: "RUNNING",
                     rowsUpserted: null,
+                    rangeSince: null,
+                    rangeUntil: null,
                     error: null,
                 };
             }),
-            finish: mock(async (_id: number, rows: number): Promise<void> => {
+            complete: mock(async (_id: number, rows: number): Promise<void> => {
                 syncRunFinished = true;
                 rowsCount = rows;
             }),
@@ -374,6 +379,7 @@ describe("Meta Master Metadata Sync (fetchAll)", () => {
         expect(result.counts.ads).toBe(1);
 
         expect(savedCampaigns[0].dailyBudgetMinor).toBe(10000000);
+        expect(savedAdSets[0].objectiveGroup).toBe("web");
         expect(savedCreatives[0].videoLengthSeconds).toBe("30.5");
         expect(savedCreatives[0].videoPermalinkUrl).toBe("https://fb.com/video/101");
         expect(savedAds[0].creativeId).toBe("creative_1");
@@ -419,17 +425,19 @@ describe("Meta Master Metadata Sync (fetchAll)", () => {
         let syncRunFinished = false;
         let rowsCount = 0;
         const mockSyncRunRepo = {
-            start: mock(async (accountId: string, resource: string): Promise<SyncRunSelect> => ({
+            create: mock(async (run: {accountId: string; resource: string}): Promise<SyncRunSelect> => ({
                 id: 2,
-                accountId,
-                resource,
+                accountId: run.accountId,
+                resource: run.resource,
                 startedAt: new Date(),
                 finishedAt: null,
                 status: "RUNNING",
                 rowsUpserted: null,
+                rangeSince: null,
+                rangeUntil: null,
                 error: null,
             })),
-            finish: mock(async (_id: number, rows: number): Promise<void> => {
+            complete: mock(async (_id: number, rows: number): Promise<void> => {
                 syncRunFinished = true;
                 rowsCount = rows;
             }),
@@ -439,8 +447,11 @@ describe("Meta Master Metadata Sync (fetchAll)", () => {
         const mockCampaignRepo = {
             upsertBatch: mock(async (): Promise<void> => {}),
         } as unknown as CampaignRepository;
+        let sdkAdSets: AdSetInsert[] = [];
         const mockAdSetRepo = {
-            upsertBatch: mock(async (): Promise<void> => {}),
+            upsertBatch: mock(async (items: AdSetInsert[]): Promise<void> => {
+                sdkAdSets = items;
+            }),
         } as unknown as AdSetRepository;
         const mockAdCreativeRepo = {
             upsertBatch: mock(async (): Promise<void> => {}),
@@ -477,6 +488,7 @@ describe("Meta Master Metadata Sync (fetchAll)", () => {
                     status: "ACTIVE",
                     effectiveStatus: "ACTIVE",
                     optimizationGoal: "OFFSITE_CONVERSIONS",
+                    destinationType: "WHATSAPP",
                     billingEvent: "IMPRESSIONS",
                     bidStrategy: "LOWEST_COST_WITHOUT_CAP",
                     bidAmountMinor: null,
@@ -532,6 +544,7 @@ describe("Meta Master Metadata Sync (fetchAll)", () => {
             })),
             getDailyAdInsights: mock(async () => []),
             getDailyAdBreakdowns: mock(async () => []),
+            getHourlyAdBreakdowns: mock(async () => []),
             getCustomPeriodMetrics: mock(async () => null),
         };
 
@@ -558,5 +571,19 @@ describe("Meta Master Metadata Sync (fetchAll)", () => {
         expect(result.counts.adSets).toBe(1);
         expect(result.counts.creatives).toBe(1);
         expect(result.counts.ads).toBe(1);
+        expect(sdkAdSets[0].optimizationGoal).toBe("OFFSITE_CONVERSIONS");
+        expect(sdkAdSets[0].objectiveGroup).toBe("wa");
+    });
+});
+
+describe("deriveObjectiveGroup", () => {
+    it("maps messaging destinations and CONVERSATIONS optimization to the wa group", () => {
+        expect(deriveObjectiveGroup("CONVERSATIONS", null)).toBe("wa");
+        expect(deriveObjectiveGroup("OFFSITE_CONVERSIONS", "WHATSAPP")).toBe("wa");
+        expect(deriveObjectiveGroup("OFFSITE_CONVERSIONS", "MESSENGER")).toBe("wa");
+        expect(deriveObjectiveGroup("OFFSITE_CONVERSIONS", "WEBSITE")).toBe("web");
+        expect(deriveObjectiveGroup(null, null)).toBe("web");
+        expect(deriveObjectiveGroup("conversations", undefined)).toBe("wa");
+        expect(deriveObjectiveGroup("OFFSITE_CONVERSIONS", "whatsapp")).toBe("wa");
     });
 });

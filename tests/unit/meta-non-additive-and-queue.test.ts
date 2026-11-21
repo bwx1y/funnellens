@@ -59,6 +59,7 @@ describe("Custom Period Non-Additive Metrics", () => {
             getVideoDetails: mock(async () => null),
             getDailyAdInsights: mock(async () => []),
             getDailyAdBreakdowns: mock(async () => []),
+            getHourlyAdBreakdowns: mock(async () => []),
             getCustomPeriodMetrics: mock(async () => ({
                 accountId: "act_na_test",
                 level: "account" as const,
@@ -139,5 +140,62 @@ describe("MetaSyncWorkerProcessor", () => {
 
         await processor.process(mockJob);
         expect(syncedCalled).toBe(true);
+    });
+
+    it("processes sync-hourly-breakdowns job across active accounts", async () => {
+        const calls: {userId: string; tenantId: string; accountId?: string; since?: string; until?: string}[] = [];
+        const mockMetaService = {
+            syncHourlyBreakdowns: mock(async (
+                user: {iss: string; tenantId: string},
+                body: {accountId?: string; since?: string; until?: string}
+            ) => {
+                calls.push({
+                    userId: user.iss,
+                    tenantId: user.tenantId,
+                    accountId: body.accountId,
+                    since: body.since,
+                    until: body.until,
+                });
+                return {};
+            }),
+        } as unknown as MetaService;
+
+        const mockConnRepo = {
+            findActiveConnections: mock(async () => [
+                {id: "conn-1", userId: "user-1", tenantId: "tenant-1"},
+                {id: "conn-2", userId: "user-2", tenantId: "tenant-2"},
+            ]),
+        } as unknown as MetaConnectionRepository;
+
+        const mockAdAccountRepo = {
+            findSelectedByTenantId: mock(async (tenantId: string) => ({
+                id: `act_${tenantId}`,
+                tenantId,
+            })),
+        } as unknown as AdAccountRepository;
+
+        const processor = new MetaSyncWorkerProcessor(
+            mockMetaService,
+            mockConnRepo,
+            mockAdAccountRepo
+        );
+
+        const mockJob = {
+            id: "job-2",
+            name: "sync-hourly-breakdowns",
+            data: {},
+        } as unknown as Job<MetaSyncJobData, void, MetaSyncJobName>;
+
+        await processor.process(mockJob);
+
+        expect(calls.length).toBe(2);
+        expect(calls[0].userId).toBe("user-1");
+        expect(calls[0].accountId).toBe("act_tenant-1");
+        expect(calls[1].userId).toBe("user-2");
+        expect(calls[1].accountId).toBe("act_tenant-2");
+        for (const call of calls) {
+            expect(call.since).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+            expect(call.until).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+        }
     });
 });
