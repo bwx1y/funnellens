@@ -5,6 +5,7 @@ import type {
     MetaAdInsightBreakdownDailyDto,
     MetaAdInsightDailyDto,
     MetaAdSetDto,
+    MetaAdStudyDto,
     MetaCampaignDto,
     MetaCustomPeriodMetricsDto,
     MetaVideoDto,
@@ -56,4 +57,13 @@ export interface IMetaAdsAdapter {
             currencyOffset?: number;
         }
     ): Promise<MetaCustomPeriodMetricsDto | null>;
+}
+
+/**
+ * Kept apart from `IMetaAdsAdapter` on purpose: three unit-test doubles implement the ads adapter and
+ * would break on a new member that has nothing to do with account-scoped insights.
+ */
+export interface IMetaAdStudiesAdapter {
+    /** Missing permission → `{hasAccess: false, studies: []}`; every other failure is thrown. */
+    getAdStudies(accessToken: string, metaUserId: string): Promise<{hasAccess: boolean; studies: MetaAdStudyDto[]}>;
 }

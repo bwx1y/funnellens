@@ -31,6 +31,15 @@ export class SyncRunRepository extends DatabaseRepository {
             .where(eq(SyncRunEntity.id, id));
     }
 
+    async findById(id: number): Promise<typeof SyncRunEntity.$inferSelect | null> {
+        const [entity] = await this.database.select()
+            .from(SyncRunEntity)
+            .where(eq(SyncRunEntity.id, id))
+            .limit(1);
+
+        return entity ?? null;
+    }
+
     async getLatestByAccountId(accountId: string, resource?: string): Promise<typeof SyncRunEntity.$inferSelect | null> {
         const conditions = [eq(SyncRunEntity.accountId, accountId)];
         if (resource) {

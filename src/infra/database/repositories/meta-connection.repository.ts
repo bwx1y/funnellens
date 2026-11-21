@@ -1,6 +1,6 @@
 import {DatabaseRepository} from "./base.repository";
 import {MetaConnectionEntity} from "@db/schema/ads/meta-connection.entity";
-import {eq} from "drizzle-orm";
+import {desc, eq} from "drizzle-orm";
 
 export class MetaConnectionRepository extends DatabaseRepository {
     async findByUserId(userId: string) {
@@ -42,5 +42,16 @@ export class MetaConnectionRepository extends DatabaseRepository {
     async findActiveConnections() {
         return this.database.select()
             .from(MetaConnectionEntity);
+    }
+
+    /** The newest connection of a tenant: one token drives the Graph calls for that tenant. */
+    async findByTenantId(tenantId: string) {
+        const [entity] = await this.database.select()
+            .from(MetaConnectionEntity)
+            .where(eq(MetaConnectionEntity.tenantId, tenantId))
+            .orderBy(desc(MetaConnectionEntity.updatedAt))
+            .limit(1);
+
+        return entity ?? null;
     }
 }

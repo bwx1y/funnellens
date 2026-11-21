@@ -38,6 +38,8 @@ export interface CreativeAggregate {
     objectiveGroup: "wa" | "web";
     spendMinor: number;
     impressions: number;
+    /** Total clicks: the denominator of the creative CTR. */
+    clicks: number;
     linkClicks: number;
     results: number;
     purchaseValueMinor: number;
@@ -49,6 +51,8 @@ export interface CreativeDailyPoint {
     date: string;
     spendMinor: number;
     impressions: number;
+    clicks: number;
+    reach: number;
     results: number;
     ctr: number | null;
     cpmMinor: number | null;
@@ -142,6 +146,7 @@ interface CreativeAggregateRow {
     objective_group: string;
     spend_minor: string;
     impressions: string;
+    clicks: string;
     link_clicks: string;
     results: string;
     purchase_value_minor: string;
@@ -150,12 +155,30 @@ interface CreativeAggregateRow {
 }
 
 interface CreativeDailyRow {
+    creative_id: string;
     date: string;
     spend_minor: string;
     impressions: string;
     clicks: string;
     reach: string;
     results: string;
+}
+
+interface CreativeAllocationRow {
+    creative_id: string;
+    adset_id: string;
+    daily_budget_minor: string | null;
+    effective_status: string | null;
+}
+
+interface CreativeVideoRow {
+    video3_sec: string | null;
+    thruplay: string | null;
+    p25: string | null;
+    p50: string | null;
+    p75: string | null;
+    p100: string | null;
+    impressions: string;
 }
 
 interface CreativeLeadQualityRow {
@@ -186,6 +209,27 @@ interface SnapshotRow {
 
 function ratio(numerator: number, denominator: number): number | null {
     return denominator > 0 ? numerator / denominator : null;
+}
+
+/** One row of the `ad_insight_metrics` view mapped to a daily point; shared by every daily reader. */
+function toDailyPoint(row: CreativeDailyRow): CreativeDailyPoint {
+    const spendMinor = Number(row.spend_minor);
+    const impressions = Number(row.impressions);
+    const results = Number(row.results);
+    const reach = Number(row.reach);
+
+    return {
+        date: row.date,
+        spendMinor,
+        impressions,
+        clicks: Number(row.clicks),
+        reach,
+        results,
+        ctr: ratio(Number(row.clicks), impressions),
+        cpmMinor: impressions > 0 ? (spendMinor / impressions) * 1000 : null,
+        cprMinor: ratio(spendMinor, results),
+        frequency: ratio(impressions, reach),
+    };
 }
 
 /**
@@ -441,6 +485,7 @@ export class AnalyticsRepository extends DatabaseRepository {
                    i.objective_group                        as objective_group,
                    coalesce(sum(i.spend_minor), 0)          as spend_minor,
                    coalesce(sum(i.impressions), 0)          as impressions,
+                   coalesce(sum(i.clicks), 0)               as clicks,
                    coalesce(sum(i.inline_link_clicks), 0)   as link_clicks,
                    coalesce(sum(i.results), 0)              as results,
                    coalesce(sum(i.purchase_value_minor), 0) as purchase_value_minor,
@@ -462,6 +507,7 @@ export class AnalyticsRepository extends DatabaseRepository {
                 objectiveGroup: row.objective_group === "wa" ? "wa" : "web",
                 spendMinor: Number(row.spend_minor),
                 impressions,
+                clicks: Number(row.clicks),
                 linkClicks: Number(row.link_clicks),
                 results: Number(row.results),
                 purchaseValueMinor: Number(row.purchase_value_minor),
@@ -471,43 +517,126 @@ export class AnalyticsRepository extends DatabaseRepository {
         });
     }
 
+    /**
+     * One series per creative, keyed by `creative_id`: fatigue needs the whole cohort's daily shape in a
+     * single round trip instead of one query per creative.
+     */
+    async getCreativeDailySeries(
+        accountId: string,
+        since: Date,
+        until: Date
+    ): Promise<{creativeId: string; points: CreativeDailyPoint[]}[]> {
+        const rows = await this.database.execute(sql`
+            select ad.creative_id                   as creative_id,
+                   i.date::text                     as date,
+                   coalesce(sum(i.spend_minor), 0)  as spend_minor,
+                   coalesce(sum(i.impressions), 0)  as impressions,
+                   coalesce(sum(i.clicks), 0)       as clicks,
+                   coalesce(sum(i.reach), 0)        as reach,
+                   coalesce(sum(i.results), 0)      as results
+            from ad_insight_metrics i
+            join ads ad on ad.id = i.ad_id
+            where ${this.insightScope(accountId, since, until)}
+            group by ad.creative_id, i.date
+            order by 1 asc, 2 asc
+        `) as unknown as CreativeDailyRow[];
+
+        const byCreative = new Map<string, CreativeDailyPoint[]>();
+        for (const row of rows) {
+            const point = toDailyPoint(row);
+            const bucket = byCreative.get(row.creative_id);
+            if (bucket === undefined) {
+                byCreative.set(row.creative_id, [point]);
+            } else {
+                bucket.push(point);
+            }
+        }
+
+        return [...byCreative.entries()].map(([creativeId, points]) => ({creativeId, points}));
+    }
+
     async getCreativeDaily(
         accountId: string,
         since: Date,
         until: Date,
         creativeId: string
     ): Promise<CreativeDailyPoint[]> {
+        const series = await this.getCreativeDailySeries(accountId, since, until);
+        return series.find((row) => row.creativeId === creativeId)?.points ?? [];
+    }
+
+    /** Ad sets that delivered each creative, with the budget and status that can cap the creative. */
+    async getCreativeAllocation(
+        accountId: string,
+        since: Date,
+        until: Date
+    ): Promise<{creativeId: string; adsetId: string; dailyBudgetMinor: number | null; effectiveStatus: string | null}[]> {
         const rows = await this.database.execute(sql`
-            select i.date::text                    as date,
-                   coalesce(sum(i.spend_minor), 0)   as spend_minor,
-                   coalesce(sum(i.impressions), 0)   as impressions,
-                   coalesce(sum(i.clicks), 0)        as clicks,
-                   coalesce(sum(i.reach), 0)         as reach,
-                   coalesce(sum(i.results), 0)       as results
+            select distinct ad.creative_id      as creative_id,
+                   ad.adset_id                  as adset_id,
+                   s.daily_budget_minor         as daily_budget_minor,
+                   s.effective_status           as effective_status
             from ad_insight_metrics i
             join ads ad on ad.id = i.ad_id
+            join ad_sets s on s.id = ad.adset_id
             where ${this.insightScope(accountId, since, until)}
+        `) as unknown as CreativeAllocationRow[];
+
+        return rows.map((row) => ({
+            creativeId: row.creative_id,
+            adsetId: row.adset_id,
+            dailyBudgetMinor: row.daily_budget_minor === null ? null : Number(row.daily_budget_minor),
+            effectiveStatus: row.effective_status,
+        }));
+    }
+
+    /**
+     * Video counters are summed without `coalesce`: `null` means the counter was never reported, `0`
+     * means it was reported as zero, and the service must keep those apart.
+     */
+    async getCreativeVideoMetrics(
+        accountId: string,
+        since: Date,
+        until: Date,
+        creativeId: string
+    ): Promise<{
+        video3Sec: number | null;
+        thruplay: number | null;
+        p25: number | null;
+        p50: number | null;
+        p75: number | null;
+        p100: number | null;
+        impressions: number;
+    }> {
+        const [row] = await this.database.execute(sql`
+            select sum(d.video_3_sec_watched_actions)    as video3_sec,
+                   sum(d.video_thruplay_watched_actions) as thruplay,
+                   sum(d.video_p25_watched_actions)      as p25,
+                   sum(d.video_p50_watched_actions)      as p50,
+                   sum(d.video_p75_watched_actions)      as p75,
+                   sum(d.video_p100_watched_actions)     as p100,
+                   coalesce(sum(d.impressions), 0)       as impressions
+            from ad_insights_daily d
+            join ads ad on ad.id = d.ad_id
+            where d.account_id = ${accountId}
+              and d.level = 'ad'
+              and d.attribution_window = ${ATTRIBUTION_WINDOW}
+              and d.date >= ${this.toDateString(since)}
+              and d.date <= ${this.toDateString(until)}
               and ad.creative_id = ${creativeId}
-            group by i.date
-            order by i.date asc
-        `) as unknown as CreativeDailyRow[];
+        `) as unknown as CreativeVideoRow[];
 
-        return rows.map((row) => {
-            const spendMinor = Number(row.spend_minor);
-            const impressions = Number(row.impressions);
-            const results = Number(row.results);
+        const toCount = (value: string | null) => (value === null ? null : Number(value));
 
-            return {
-                date: row.date,
-                spendMinor,
-                impressions,
-                results,
-                ctr: ratio(Number(row.clicks), impressions),
-                cpmMinor: impressions > 0 ? (spendMinor / impressions) * 1000 : null,
-                cprMinor: ratio(spendMinor, results),
-                frequency: ratio(impressions, Number(row.reach)),
-            };
-        });
+        return {
+            video3Sec: toCount(row?.video3_sec ?? null),
+            thruplay: toCount(row?.thruplay ?? null),
+            p25: toCount(row?.p25 ?? null),
+            p50: toCount(row?.p50 ?? null),
+            p75: toCount(row?.p75 ?? null),
+            p100: toCount(row?.p100 ?? null),
+            impressions: Number(row?.impressions ?? 0),
+        };
     }
 
     /**

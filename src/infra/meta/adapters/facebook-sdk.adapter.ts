@@ -1,9 +1,10 @@
 import bizSdk from "facebook-nodejs-business-sdk";
 import {createHash} from "node:crypto";
-import type {IMetaAdsAdapter} from "../base.meta";
+import type {IMetaAdsAdapter, IMetaAdStudiesAdapter} from "../base.meta";
 import type {
     MetaAdAccountDto,
     MetaAdCreativeDto,
+    MetaAdStudyDto,
     MetaAdDto,
     MetaAdInsightActionDto,
     MetaAdInsightBreakdownDailyDto,
@@ -35,7 +36,7 @@ function parseHourOfDay(value: unknown): number | null {
     return hour >= 0 && hour <= 23 ? hour : null;
 }
 
-export class FacebookSdkAdapter implements IMetaAdsAdapter {
+export class FacebookSdkAdapter implements IMetaAdsAdapter, IMetaAdStudiesAdapter {
     private initApi(accessToken: string): void {
         bizSdk.FacebookAdsApi.init(accessToken);
     }
@@ -712,4 +713,57 @@ export class FacebookSdkAdapter implements IMetaAdsAdapter {
             throw error;
         }
     }
+
+    /**
+     * `ad_studies` needs a permission the token may not carry. That case is a normal answer for the
+     * endpoint (`permission_missing`), not a 500, so it is mapped here instead of in the service.
+     */
+    async getAdStudies(
+        accessToken: string,
+        metaUserId: string
+    ): Promise<{hasAccess: boolean; studies: MetaAdStudyDto[]}> {
+        this.initApi(accessToken);
+        const user = new bizSdk.User(metaUserId);
+
+        const fields = ["id", "name", "type", "start_time", "end_time", "results_first_available_date"];
+
+        try {
+            const rows = await this.fetchAllSdk(
+                (f, p) => user.getAdStudies(f, p) as Promise<SdkCursor>,
+                fields,
+                {limit: 100}
+            );
+
+            return {
+                hasAccess: true,
+                studies: rows.map((row) => ({
+                    id: String(row.id),
+                    name: row.name ? String(row.name) : null,
+                    type: row.type ? String(row.type) : null,
+                    startTime: row.start_time ? String(row.start_time) : null,
+                    endTime: row.end_time ? String(row.end_time) : null,
+                    resultsFirstAvailableDate: row.results_first_available_date
+                        ? String(row.results_first_available_date)
+                        : null,
+                })),
+            };
+        } catch (error) {
+            if (isPermissionError(error)) return {hasAccess: false, studies: []};
+            throw error;
+        }
+    }
+}
+
+/** Graph permission failures: codes 10/200/294, or an OAuth message that names the permission. */
+function isPermissionError(error: unknown): boolean {
+    if (error === null || typeof error !== "object") return false;
+
+    const candidate = error as {code?: unknown; message?: unknown; response?: {code?: unknown; message?: unknown}};
+    const code = candidate.code ?? candidate.response?.code;
+    if (code === 10 || code === 200 || code === 294 || code === "10" || code === "200" || code === "294") {
+        return true;
+    }
+
+    const message = candidate.message ?? candidate.response?.message;
+    return typeof message === "string" && message.toLowerCase().includes("permission");
 }

@@ -8,6 +8,7 @@ import {WaContactController} from "@/modules/wa/contact";
 import {MetaController, MetaOAuthController} from "@/modules/meta";
 import {AnalyticsController} from "@/modules/analytics";
 import {AudienceController, LeadController} from "@/modules/audience";
+import {CreativeController} from "@/modules/creative";
 
 export const routes = new Elysia({
     prefix: "/api"
@@ -22,4 +23,5 @@ export const routes = new Elysia({
     .use(MetaController)
     .use(AnalyticsController)
     .use(AudienceController)
-    .use(LeadController);
+    .use(LeadController)
+    .use(CreativeController);

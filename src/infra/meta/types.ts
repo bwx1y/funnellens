@@ -171,3 +171,13 @@ export interface MetaCustomPeriodMetricsDto {
     clicks: number;
     raw: Record<string, unknown>;
 }
+
+/** `GET /{metaUserId}/ad_studies`: an A/B study shell; results only exist once Meta publishes them. */
+export interface MetaAdStudyDto {
+    id: string;
+    name: string | null;
+    type: string | null;
+    startTime: string | null;
+    endTime: string | null;
+    resultsFirstAvailableDate: string | null;
+}

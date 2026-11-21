@@ -1,9 +1,10 @@
 import {DatabaseRepository} from "./base.repository";
+import {AdAccountEntity} from "@db/schema/ads/ad-account.entity";
 import {AdCreativeEntity} from "@db/schema/ads/ad-creative.entity";
 import {CreativeTagEntity} from "@db/schema/ads/creative-tag.entity";
 import {AdEntity} from "@db/schema/ads/ad.entity";
 import {AdInsightDailyEntity} from "@db/schema/ads/ad-insight-daily.entity";
-import {and, eq, inArray, sql} from "drizzle-orm";
+import {and, eq, gte, inArray, lte, sql} from "drizzle-orm";
 
 const CHUNK_SIZE = 500;
 
@@ -44,6 +45,29 @@ export class AdCreativeRepository extends DatabaseRepository {
         return this.database.select()
             .from(AdCreativeEntity)
             .where(eq(AdCreativeEntity.accountId, accountId));
+    }
+
+    async findById(creativeId: string): Promise<typeof AdCreativeEntity.$inferSelect | null> {
+        const [entity] = await this.database.select()
+            .from(AdCreativeEntity)
+            .where(eq(AdCreativeEntity.id, creativeId))
+            .limit(1);
+
+        return entity ?? null;
+    }
+
+    /** A creative of another tenant must be indistinguishable from a missing one. */
+    async findByIdForTenant(
+        tenantId: string,
+        creativeId: string
+    ): Promise<typeof AdCreativeEntity.$inferSelect | null> {
+        const [entity] = await this.database.select({creative: AdCreativeEntity})
+            .from(AdCreativeEntity)
+            .innerJoin(AdAccountEntity, eq(AdAccountEntity.id, AdCreativeEntity.accountId))
+            .where(and(eq(AdCreativeEntity.id, creativeId), eq(AdAccountEntity.tenantId, tenantId)))
+            .limit(1);
+
+        return entity?.creative ?? null;
     }
 
     async findWithTags(accountId: string): Promise<AdCreativeWithTags[]> {
@@ -113,16 +137,26 @@ export class AdCreativeRepository extends DatabaseRepository {
     }
 
     /**
-     * Creatives that actually have insight rows. Order follows `ids` so the caller can map directly;
-     * snapshot scoping is the service's job (`ad_insights_daily` carries no snapshot column).
+     * Creatives that actually have insight rows. Order follows `ids` so the caller can map directly.
+     * `ad_insights_daily` carries no snapshot column, so a snapshot is expressed as its date window.
      */
-    async eligibleByIds(accountId: string, ids: string[]): Promise<string[]> {
+    async eligibleByIds(
+        accountId: string,
+        ids: string[],
+        window?: {since: Date; until: Date}
+    ): Promise<string[]> {
         if (ids.length === 0) return [];
+
+        const conditions = [eq(AdEntity.accountId, accountId), inArray(AdEntity.creativeId, ids)];
+        if (window !== undefined) {
+            conditions.push(gte(AdInsightDailyEntity.date, this.toDateString(window.since)));
+            conditions.push(lte(AdInsightDailyEntity.date, this.toDateString(window.until)));
+        }
 
         const rows = await this.database.selectDistinct({creativeId: AdEntity.creativeId})
             .from(AdEntity)
             .innerJoin(AdInsightDailyEntity, eq(AdInsightDailyEntity.adId, AdEntity.id))
-            .where(and(eq(AdEntity.accountId, accountId), inArray(AdEntity.creativeId, ids)));
+            .where(and(...conditions));
 
         const eligible = new Set(rows.map((row) => row.creativeId).filter((id): id is string => id !== null));
         return ids.filter((id) => eligible.has(id));
