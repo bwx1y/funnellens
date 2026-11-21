@@ -1,0 +1,11 @@
+# FunnelLens Backend Completed Tasks (DONE)
+
+Daftar fitur backend yang telah selesai diimplementasikan dan diuji:
+
+| No | Fitur | File Dokumentasi | Tanggal Selesai | Status |
+|---|---|---|---|---|
+| 01 | **Ad Account Management** | [`01-ad-account-management.md`](./01-ad-account-management.md) | 2026-11-21 | Selesai & Teruji ✅ |
+| 02 | **Master Metadata Sync (`fetchAll`)** | [`02-master-metadata-sync.md`](./02-master-metadata-sync.md) | 2026-11-21 | Selesai & Teruji ✅ |
+| 03 | **Meta SDK Adapter Layer** | [`03-meta-sdk-adapter.md`](./03-meta-sdk-adapter.md) | 2026-11-21 | Selesai & Teruji ✅ |
+| 04 | **Ads Insights Sync Engine** | [`04-ads-insights-sync.md`](./04-ads-insights-sync.md) | 2026-11-22 | Selesai & Teruji ✅ |
+| 05 | **Non-Additive Metrics & Queue Scheduler** | [`05-non-additive-and-queue.md`](./05-non-additive-and-queue.md) | 2026-11-22 | Selesai & Teruji ✅ |
