@@ -386,13 +386,30 @@ describe("Database repositories", () => {
 
         expect((await alertRepo.findActiveByAccountId(accountId)).length).toBe(1);
 
-        await alertRepo.updateStatus(alert.id, "snoozed");
+        await alertRepo.snooze(alert.id, new Date(Date.now() + 24 * 60 * 60 * 1000));
 
         expect((await alertRepo.findActiveByAccountId(accountId)).length).toBe(0);
         const [stored] = await db.select()
             .from(InsightAlertEntity)
             .where(eq(InsightAlertEntity.id, alert.id));
         expect(stored.status).toBe("SNOOZED");
+    });
+
+    it("InsightAlertRepository.resolveByRuleKey keeps the rows the caller still reports", async () => {
+        await db.insert(InsightAlertEntity).values([
+            {accountId, ruleKey: "creative_fatigue", level: "WARNING", title: "Jenuh", entityType: "creative", entityId: "cr_keep"},
+            {accountId, ruleKey: "creative_fatigue", level: "WARNING", title: "Jenuh", entityType: "creative", entityId: "cr_stale"},
+        ]);
+
+        expect(await alertRepo.resolveByRuleKey(accountId, "creative_fatigue", ["cr_keep"])).toBe(1);
+
+        const rows = await db.select()
+            .from(InsightAlertEntity)
+            .where(eq(InsightAlertEntity.accountId, accountId));
+        const byEntity = new Map(rows.map((row) => [row.entityId, row]));
+        expect(byEntity.get("cr_keep")?.status).toBe("ACTIVE");
+        expect(byEntity.get("cr_stale")?.status).toBe("DONE");
+        expect(byEntity.get("cr_stale")?.resolvedAt).not.toBeNull();
     });
 
     it("SyncRunRepository creates a running run and completes it", async () => {

@@ -16,3 +16,4 @@ Daftar fitur backend yang telah selesai diimplementasikan dan diuji:
 | 10 | **Audience Intelligence & Leads Management** | [`10-audience-intelligence.md`](./10-audience-intelligence.md) | 2026-11-21 | Selesai & Teruji ✅ |
 | 11 | **Creative Intelligence & Fatigue Detection** | [`11-creative-intelligence.md`](./11-creative-intelligence.md) | 2026-11-21 | Selesai & Teruji ✅ |
 | 12 | **Tracking Health & CAPI Monitoring** | [`12-tracking-health.md`](./12-tracking-health.md) | 2026-11-22 | Selesai & Teruji ✅ |
+| 13 | **Alerts & Health Scoring Engine** | [`13-alerts-health-scoring.md`](./13-alerts-health-scoring.md) | 2026-11-21 | Selesai & Teruji ✅ |

@@ -8,6 +8,7 @@ import {WorkerManager} from "@infra/queue";
 import {redisConnection} from "@infra/redis";
 import {logger} from "@shared/logger";
 import {WaSessionService} from "@/modules/wa/session/service";
+import {AlertsQueue} from "@/modules/alerts/queue";
 
 // Dynamic discovery of worker files across feature modules
 const workerGlob = new Bun.Glob("./modules/**/worker.ts");
@@ -120,6 +121,12 @@ if (Config.application.mode !== "test") {
     const waSessionService = new WaSessionService();
     void waSessionService.syncSessionsOnStartup().catch((err) => {
         logger.warn({err}, "[Startup] Background sync OpenWA sessions failed");
+    });
+
+    // Hourly alert evaluation across every selected account.
+    const alertsQueue = new AlertsQueue();
+    void alertsQueue.scheduleCronJobs().catch((err) => {
+        logger.warn({err}, "[Startup] Alert evaluation scheduler failed");
     });
 
     let isShuttingDown = false;

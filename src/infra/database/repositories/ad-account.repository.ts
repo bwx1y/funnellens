@@ -39,6 +39,14 @@ export class AdAccountRepository extends DatabaseRepository {
         return entity ?? null;
     }
 
+    /** Selected accounts across every tenant; the alert job runs without a Meta connection. */
+    async findSelected(): Promise<(typeof AdAccountEntity.$inferSelect)[]> {
+        return this.database.select()
+            .from(AdAccountEntity)
+            .where(eq(AdAccountEntity.isSelected, true))
+            .orderBy(AdAccountEntity.id);
+    }
+
     async upsert(account: typeof AdAccountEntity.$inferInsert): Promise<typeof AdAccountEntity.$inferSelect> {
         const [entity] = await this.database.insert(AdAccountEntity)
             .values(account)
