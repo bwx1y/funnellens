@@ -49,7 +49,7 @@ Constructor DI (repo, dua queue, `appSecret`) sehingga test menyuntik fake tanpa
 | `enqueue` | `cloudQueue.add("ingest", {raw, receivedAt ISO}, {jobId: sha256(raw).slice(0,32)})` |
 | `ingest` | `JSON.parse` di dalam `try` (gagal → `logger.warn` + return, tanpa retry); iterasi setiap `entry[].changes[].value` |
 | `ingestOpenWa` | nomor bisnis = `fromMe ? from : to`; `findBySessionId` → `upsert` bila belum ada; akun diselesaikan sama seperti Cloud |
-| `writeMessage` | normalisasi nomor, `wamid` wajib, masking body, atribusi, lalu `ingestInbound`/`ingestOutbound`; inbound baru → `assessmentQueue.add("assess", {leadId, messageId}, {jobId: "assess:" + wamid})` |
+| `writeMessage` | normalisasi nomor, `wamid` wajib, masking body, atribusi, lalu `ingestInbound`/`ingestOutbound`; inbound baru → `assessmentQueue.add("assess", {leadId, messageId}, {jobId: assessJobId(wamid)})` |
 
 Waktu event: `Number(timestamp)`; finite dan `> 0` → `> 1e12` dianggap milidetik, selain itu detik; gagal → `receivedAt`. Body: `text.body ?? button.text ?? null`.
 
@@ -78,7 +78,7 @@ Query dibaca dari `new URL(request.url).searchParams` karena key bertitik (`hub.
 | Uji | Cakupan |
 |---|---|
 | `tests/unit/wa-cloud-helpers.test.ts` | `normalizePhone` 4 bentuk + kosong, `maskPhone`, `maskText`; `isValidSignature` cocok/berubah/header hilang/header non-hex; secret `""` dan `"APP_SECRET"` → `false` + `signatureConfigured false` |
-| `tests/integration/wa-cloud-ingestion.test.ts` (Postgres nyata, Redis di-stub) | signature salah → 401 + 0 baris; signature valid → 200 + satu job `ingest` dengan `jobId = sha256(raw).slice(0,32)`; ingest dua kali → 1 baris `wamid` + 1 job `assess:<wamid>`; lead tanpa `referral` → `ad_id`/`attribution_note` NULL, `phone_masked`, `external_id = phoneHash`, body termasking; `referral` ad → rantai campaign/adset/ad/creative terisi, creative berubah → `attribution_after_change`; echo → 1 baris `OUTBOUND`/`CS`, `replied_at` + `response_seconds = 120`, `first_replied_at` terisi, `GET /api/analytics/audience/conversations` → `timed.measuredLeads ≥ 1`; `ingestOpenWa` inbound/outbound menulis tabel yang sama |
+| `tests/integration/wa-cloud-ingestion.test.ts` (Postgres nyata, Redis di-stub) | signature salah → 401 + 0 baris; signature valid → 200 + satu job `ingest` dengan `jobId = sha256(raw).slice(0,32)`; ingest dua kali → 1 baris `wamid` + 1 job `assess-<wamid>`; lead tanpa `referral` → `ad_id`/`attribution_note` NULL, `phone_masked`, `external_id = phoneHash`, body termasking; `referral` ad → rantai campaign/adset/ad/creative terisi, creative berubah → `attribution_after_change`; echo → 1 baris `OUTBOUND`/`CS`, `replied_at` + `response_seconds = 120`, `first_replied_at` terisi, `GET /api/analytics/audience/conversations` → `timed.measuredLeads ≥ 1`; `ingestOpenWa` inbound/outbound menulis tabel yang sama |
 
 ## Keputusan & Catatan
 - **Nomor tak terikat → `continue`, bukan `return`**: satu body webhook dapat membawa beberapa WABA; melewati yang tidak dikenal tidak boleh membuang yang lain, dan keduanya tidak memicu retry.

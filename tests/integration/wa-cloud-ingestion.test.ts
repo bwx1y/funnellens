@@ -239,7 +239,7 @@ describe("WhatsApp Cloud API ingestion", () => {
 
         expect(jobs.length).toBe(1);
         expect(jobs[0].name).toBe("assess");
-        expect(jobs[0].options?.jobId).toBe(`assess:${wamid}`);
+        expect(jobs[0].options?.jobId).toBe(`assess-${wamid}`);
     });
 
     it("stores an unattributed lead with a masked phone and masked body", async () => {
@@ -427,7 +427,7 @@ describe("WhatsApp Cloud API ingestion", () => {
 
         // The assessment job is queued for the inbound message only.
         expect(jobs.length).toBe(1);
-        expect(jobs[0].options?.jobId).toBe(`assess:${inboundWamid}`);
+        expect(jobs[0].options?.jobId).toBe(`assess-${inboundWamid}`);
 
         const token = await new JwtUtil().register({id: `user-${u}`, tenant: tenantId, role: "ADMIN"});
         const response = await app.handle(new Request(

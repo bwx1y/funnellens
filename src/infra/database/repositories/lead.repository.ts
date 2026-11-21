@@ -262,6 +262,15 @@ export class LeadRepository extends DatabaseRepository {
         return {leads, total: Number(counted.total)};
     }
 
+    async findById(id: number): Promise<Lead | null> {
+        const [entity] = await this.database.select()
+            .from(LeadEntity)
+            .where(eq(LeadEntity.id, id))
+            .limit(1);
+
+        return entity ?? null;
+    }
+
     /** Joined to the account's tenant, so a foreign lead is indistinguishable from a missing one. */
     async getByIdForTenant(tenantId: string, id: number): Promise<Lead | null> {
         const [row] = await this.database.select({lead: LeadEntity})

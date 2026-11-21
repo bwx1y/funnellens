@@ -6,7 +6,7 @@ import {WaPhoneRepository} from "@db/repositories/wa-phone.repository";
 import {AdRepository} from "@db/repositories/ad.repository";
 import {AdAccountRepository} from "@db/repositories/ad-account.repository";
 import {ConversationIngestRepository, type IngestAttribution} from "@db/repositories/conversation-ingest.repository";
-import {LeadAssessmentQueue} from "@/modules/audience/queue";
+import {LeadAssessmentQueue, assessJobId} from "@/modules/audience/queue";
 import {WaCloudQueue} from "@/modules/wa/cloud/queue";
 import type {CloudChangeValue, CloudMessage, CloudReferral, CloudWebhookPayload} from "@/modules/wa/cloud/types";
 import type {MessageReceived} from "@/modules/wa/webhook/schema";
@@ -216,7 +216,7 @@ export class CloudIngestService {
 
         if (result.messageId !== null) {
             await this.assessmentQueue.add("assess", {leadId: result.leadId, messageId: result.messageId}, {
-                jobId: "assess:" + wamid,
+                jobId: assessJobId(wamid),
             });
         }
     }

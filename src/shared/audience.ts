@@ -19,7 +19,8 @@ export type ResponseBucket = typeof RESPONSE_BUCKETS[number];
 
 export const HEATMAP_MIN_LEADS_PER_BUCKET = 10;
 
-export type TemperatureLevel = "COLD" | "WARM" | "HOT";
+export const TEMPERATURE_LEVELS = ["COLD", "WARM", "HOT"] as const;
+export type TemperatureLevel = typeof TEMPERATURE_LEVELS[number];
 
 export interface SankeyLink {
     from: TemperatureLevel;

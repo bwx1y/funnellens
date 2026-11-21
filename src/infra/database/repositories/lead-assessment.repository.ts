@@ -1,5 +1,8 @@
-import {DatabaseRepository} from "./base.repository";
+import {DatabaseRepository, type DatabaseTransaction} from "./base.repository";
 import {LeadAssessmentEntity} from "@db/schema/wa/lead-assessment.entity";
+import {LeadMilestoneEntity} from "@db/schema/wa/lead-milestone.entity";
+import {LeadEntity} from "@db/schema/wa/lead.entity";
+import {LeadMilestoneRepository} from "./lead-milestone.repository";
 import {and, desc, eq, sql} from "drizzle-orm";
 
 export type LeadAssessment = typeof LeadAssessmentEntity.$inferSelect;
@@ -10,6 +13,17 @@ export interface AppendAssessmentResult {
     applied: boolean;
 }
 
+/** Availability marker: the row records that no decision could be made, never a level. */
+export interface UnavailableAssessmentInput {
+    leadId: number;
+    level: LeadAssessment["level"];
+    reason: string;
+    error: string;
+    eventAt: Date;
+    ruleVersion: string;
+    model: string | null;
+}
+
 const DEFAULT_HISTORY_LIMIT = 50;
 const MAX_HISTORY_LIMIT = 200;
 
@@ -18,12 +32,19 @@ const MAX_HISTORY_LIMIT = 200;
  * a row whose `event_at` predates the newest stored event is persisted but not applied.
  */
 export class LeadAssessmentRepository extends DatabaseRepository {
+    private readonly milestones = new LeadMilestoneRepository();
+
     /**
-     * Runs inside the caller's transaction (the assessment writer owns the transaction):
-     * a replayed `(leadId, eventAt, ruleVersion)` returns the stored row instead of duplicating it.
+     * `tx` is passed by `applyAssessment`, which owns the transaction: a replayed
+     * `(leadId, eventAt, ruleVersion)` returns the stored row instead of duplicating it.
      */
-    async appendIfCurrent(assessment: InsertLeadAssessment): Promise<AppendAssessmentResult> {
-        const [latest] = await this.database.execute(sql`
+    async appendIfCurrent(
+        assessment: InsertLeadAssessment,
+        tx?: DatabaseTransaction
+    ): Promise<AppendAssessmentResult> {
+        const db = (tx ?? this.database) as typeof this.database;
+
+        const [latest] = await db.execute(sql`
             select max(event_at) as max_event_at
             from lead_assessments
             where lead_id = ${assessment.leadId}
@@ -32,7 +53,7 @@ export class LeadAssessmentRepository extends DatabaseRepository {
         const maxEventAt = latest?.max_event_at ?? null;
         const applied = maxEventAt === null || assessment.eventAt >= new Date(maxEventAt);
 
-        const [inserted] = await this.database.insert(LeadAssessmentEntity)
+        const [inserted] = await db.insert(LeadAssessmentEntity)
             .values({...assessment, applied})
             .onConflictDoNothing({
                 target: [
@@ -47,7 +68,7 @@ export class LeadAssessmentRepository extends DatabaseRepository {
             return {assessment: inserted, applied: inserted.applied};
         }
 
-        const [existing] = await this.database.select()
+        const [existing] = await db.select()
             .from(LeadAssessmentEntity)
             .where(
                 and(
@@ -61,10 +82,64 @@ export class LeadAssessmentRepository extends DatabaseRepository {
         return {assessment: existing, applied: existing.applied};
     }
 
+    /**
+     * The only writer of `leads.temperature`: one transaction for the append-only row, the first-time
+     * WARM/HOT milestone, and the lead level — each skipped when the row is not the newest event.
+     */
+    async applyAssessment(assessment: InsertLeadAssessment): Promise<AppendAssessmentResult> {
+        return this.database.transaction(async (tx) => {
+            const stored = await this.appendIfCurrent(assessment, tx);
+            if (!stored.applied) return stored;
+
+            const {leadId, level, eventAt} = stored.assessment;
+
+            if (level === "WARM" || level === "HOT") {
+                await this.milestones.recordFirst(leadId, level, eventAt, tx);
+            }
+
+            await tx.update(LeadEntity)
+                .set({temperature: level, updatedAt: new Date()})
+                .where(eq(LeadEntity.id, leadId));
+
+            return stored;
+        });
+    }
+
+    /**
+     * Records that no decision could be made. The row is never `applied` and carries its own rule
+     * version, so it neither moves the lead nor blocks a later successful run at the same `eventAt`.
+     * `confidence` is a marker value: `latestByLead` only reads applied rows.
+     */
+    async appendUnavailable(input: UnavailableAssessmentInput): Promise<void> {
+        await this.database.insert(LeadAssessmentEntity)
+            .values({
+                leadId: input.leadId,
+                level: input.level,
+                confidence: "tidak tersedia",
+                reason: input.reason,
+                evidence: {status: "UNAVAILABLE", error: input.error},
+                eventAt: input.eventAt,
+                applied: false,
+                ruleVersion: input.ruleVersion,
+                model: input.model,
+            })
+            .onConflictDoNothing({
+                target: [
+                    LeadAssessmentEntity.leadId,
+                    LeadAssessmentEntity.eventAt,
+                    LeadAssessmentEntity.ruleVersion,
+                ],
+            });
+    }
+
+    /** Latest applied row: unavailability markers and replayed rows never surface as a level. */
     async latestByLead(leadId: number): Promise<LeadAssessment | null> {
         const [entity] = await this.database.select()
             .from(LeadAssessmentEntity)
-            .where(eq(LeadAssessmentEntity.leadId, leadId))
+            .where(and(
+                eq(LeadAssessmentEntity.leadId, leadId),
+                eq(LeadAssessmentEntity.applied, true)
+            ))
             .orderBy(desc(LeadAssessmentEntity.eventAt), desc(LeadAssessmentEntity.createdAt))
             .limit(1);
 
@@ -92,7 +167,8 @@ export class LeadAssessmentRepository extends DatabaseRepository {
                        lag(a.level) over (partition by a.lead_id order by a.event_at asc, a.created_at asc) as prev_level
                 from lead_assessments a
                 join leads l on l.id = a.lead_id
-                where l.account_id = ${accountId}
+                where a.applied = true
+                  and l.account_id = ${accountId}
                   and l.first_seen_at >= ${since.toISOString()}::timestamptz
                   and l.first_seen_at <= ${until.toISOString()}::timestamptz
                   ${campaignId === undefined ? sql`` : sql`and l.campaign_id = ${campaignId}`}
