@@ -17,6 +17,7 @@ function fakeCursor(rows: Record<string, unknown>[]): FakeCursor {
 
 const originalGetInsights = bizSdk.AdAccount.prototype.getInsights;
 const originalGetAdSets = bizSdk.AdAccount.prototype.getAdSets;
+const originalReadVideo = bizSdk.AdVideo.prototype.read;
 
 function stubInsights(rows: Record<string, unknown>[]) {
     const calls: GetInsightsArgs[] = [];
@@ -34,6 +35,7 @@ function stubInsights(rows: Record<string, unknown>[]) {
 afterEach(() => {
     bizSdk.AdAccount.prototype.getInsights = originalGetInsights;
     bizSdk.AdAccount.prototype.getAdSets = originalGetAdSets;
+    bizSdk.AdVideo.prototype.read = originalReadVideo;
 });
 
 describe("FacebookSdkAdapter", () => {
@@ -52,9 +54,14 @@ describe("FacebookSdkAdapter", () => {
     });
 
     it("getVideoDetails handles invalid videoId gracefully without crashing", async () => {
+        const readVideo = mock(async () => {
+            throw new Error("Unsupported get request: video not found");
+        });
+        bizSdk.AdVideo.prototype.read = readVideo as typeof originalReadVideo;
         const adapter = new FacebookSdkAdapter();
         const video = await adapter.getVideoDetails("test-token", "non-existent-video-id");
         expect(video).toBeNull();
+        expect(readVideo).toHaveBeenCalledTimes(1);
     });
 
     it("getAdSets requests destination_type and maps it into the DTO", async () => {

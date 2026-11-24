@@ -205,6 +205,18 @@ Sebagian test butuh service hidup sesuai `.env`:
 
 `tests/unit/email-token.test.ts` dan `tests/integration/wa-disconnected.test.ts` mem-monkeypatch repository/`queue.add` sehingga tidak menyentuh DB maupun SMTP nyata.
 
+### Smoke test orkestrasi AI dengan data dummy
+
+Jalankan PostgreSQL dan Redis lokal khusus pengujian. Buat database kosong bernama `funnellens_qa`, lalu atur `DATABASE_HOST`, `DATABASE_PORT`, `DATABASE_NAME`, `DATABASE_USER`, `DATABASE_PASSWORD`, `REDIS_HOST`, dan `REDIS_PORT` agar menunjuk ke layanan tersebut. Gunakan `127.0.0.1` atau `localhost` dan sisakan Redis DB 15 untuk uji ini, atau set `REDIS_DB` ke database Redis khusus QA.
+
+```bash
+bun install --frozen-lockfile
+bun run db:push
+bun run scripts/qa-ai-orchestration.ts
+```
+
+Uji ini memakai dua campaign dan tiga percakapan dummy. Webhook, worker BullMQ, penulisan PostgreSQL, dan rute analitik memakai implementasi aplikasi. Adapter Gemini diarahkan ke server respons fixture di loopback. Hasil yang diperiksa mencakup HOT, WARM, COLD, deduplikasi pesan, funnel Website, narasi `READY`, dan narasi `FALLBACK` setelah dua respons model yang ditolak.
+
 ---
 
 ## Struktur Proyek
