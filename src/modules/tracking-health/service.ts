@@ -3,6 +3,11 @@ import {PixelSourceRepository, type PixelSource} from "@db/repositories/pixel-so
 import {TrackingHealthRepository, type TrackingHealthEvent} from "@db/repositories/tracking-health.repository";
 import {round4} from "@shared/numbers";
 import {ExplanationService, type ExplanationRef} from "@/modules/explanations/service";
+import {
+    PurchaseReconciliationRepository,
+    type ReconciliationRow,
+} from "@db/repositories/purchase-reconciliation.repository";
+import {RECONCILIATION_WINDOW_DAYS} from "@/modules/reports/reconciliation.service";
 import {formatNumber, formatPercent} from "@/modules/explanations/rules";
 import {
     DEDUP_TARGET,
@@ -64,6 +69,8 @@ export interface TrackingHealthResponse {
         nextCheck: string | null;
         note?: string;
     }[];
+    /** The last 7 reconciled days; empty until the business records its own orders. */
+    reconciliation: ReconciliationRow[];
     sample: SampleBlock;
     note?: string;
     explanation: ExplanationRef | null;
@@ -112,15 +119,17 @@ export class TrackingHealthService {
     constructor(
         private readonly pixelSourceRepo = new PixelSourceRepository(),
         private readonly trackingHealthRepo = new TrackingHealthRepository(),
-        private readonly explanations = new ExplanationService()
+        private readonly explanations = new ExplanationService(),
+        private readonly reconciliationRepo = new PurchaseReconciliationRepository()
     ) {}
 
     async getTrackingHealth(tenantId: string, query: TrackingHealthQuery): Promise<TrackingHealthResponse> {
         const account = await requireAccountScope(tenantId, query.accountId);
 
-        const [pixels, summary] = await Promise.all([
+        const [pixels, summary, reconciliation] = await Promise.all([
             this.pixelSourceRepo.findByAccountId(account.id),
             this.trackingHealthRepo.getLatestStatus(account.id),
+            this.reconciliationRepo.findRecent(account.id, RECONCILIATION_WINDOW_DAYS),
         ]);
 
         const pixelRow = pickPrimaryPixel(pixels);
@@ -195,6 +204,7 @@ export class TrackingHealthService {
 
         return {
             date: summary.date,
+            reconciliation,
             pixel: {
                 connected: pixelRow === null ? null : true,
                 pixelId: pixelRow?.pixelId ?? null,

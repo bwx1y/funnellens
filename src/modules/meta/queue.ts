@@ -38,7 +38,9 @@ export type MetaSyncJobName =
     | "re-sync-trailing"
     | "sync-master"
     | "sync-hourly-breakdowns"
-    | "sync-pixel-stats";
+    | "sync-pixel-stats"
+    | "refresh-meta-tokens"
+    | "reconcile-purchases";
 
 export const META_SYNC_QUEUE_NAME = "meta-sync";
 
@@ -89,5 +91,22 @@ export class MetaSyncQueue extends QueueManager<MetaSyncJobData, void, MetaSyncJ
             name: "sync-pixel-stats",
             data: {},
         });
+
+        // Token refresh: before the nightly re-sync, so a token that expires today is renewed first
+        await this.instance.upsertJobScheduler("refresh-meta-tokens", {
+            pattern: "0 2 * * *",
+        }, {
+            name: "refresh-meta-tokens",
+            data: {},
+        });
+
+        // Purchase reconciliation: after the 02:00 insight sync, on settled numbers
+        await this.instance.upsertJobScheduler("reconcile-purchases", {
+            pattern: "0 4 * * *",
+        }, {
+            name: "reconcile-purchases",
+            data: {},
+        });
+
     }
 }

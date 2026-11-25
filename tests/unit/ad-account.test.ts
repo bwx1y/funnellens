@@ -46,6 +46,8 @@ describe("Ad Account Management", () => {
             metaUserId: "meta-123",
             metaUserName: "Meta User",
             accessToken: "expired-token",
+            refreshToken: null,
+            tokenRefreshedAt: null,
             scopes: ["ads_read"],
             expiresAt: new Date(Date.now() - 10000),
             createdAt: new Date(),
@@ -71,6 +73,8 @@ describe("Ad Account Management", () => {
             metaUserId: "meta-123",
             metaUserName: "Meta User",
             accessToken: "valid-token",
+            refreshToken: null,
+            tokenRefreshedAt: null,
             scopes: ["ads_read"],
             expiresAt: new Date(Date.now() + 100000),
             createdAt: new Date(),
@@ -95,6 +99,8 @@ describe("Ad Account Management", () => {
                     accountStatus: r.accountStatus ?? null,
                     businessId: r.businessId ?? null,
                     isSelected: false,
+                    lastSyncAt: null,
+                    lastSyncError: null,
                     createdAt: new Date(),
                     updatedAt: new Date(),
                 }));
@@ -110,6 +116,8 @@ describe("Ad Account Management", () => {
                     accountStatus: r.accountStatus ?? null,
                     businessId: r.businessId ?? null,
                     isSelected: false,
+                    lastSyncAt: null,
+                    lastSyncError: null,
                     createdAt: new Date(),
                     updatedAt: new Date(),
                 }));
@@ -169,6 +177,8 @@ describe("Ad Account Management", () => {
             metaUserId: "meta-123",
             metaUserName: "Meta User",
             accessToken: "valid-token",
+            refreshToken: null,
+            tokenRefreshedAt: null,
             scopes: ["ads_read", "business_management"],
             expiresAt: new Date(Date.now() + 100000),
             createdAt: new Date(),
@@ -191,6 +201,8 @@ describe("Ad Account Management", () => {
                     accountStatus: r.accountStatus ?? null,
                     businessId: null,
                     isSelected: false,
+                    lastSyncAt: null,
+                    lastSyncError: null,
                     createdAt: new Date(),
                     updatedAt: new Date(),
                 }));
@@ -206,6 +218,8 @@ describe("Ad Account Management", () => {
                     accountStatus: 1,
                     businessId: null,
                     isSelected: false,
+                    lastSyncAt: null,
+                    lastSyncError: null,
                     createdAt: new Date(),
                     updatedAt: new Date(),
                 },
@@ -281,6 +295,8 @@ describe("Ad Account Management", () => {
             accountStatus: 1,
             businessId: "biz_1",
             isSelected: false,
+            lastSyncAt: null,
+            lastSyncError: null,
             createdAt: new Date(),
             updatedAt: new Date(),
         };
@@ -298,7 +314,8 @@ describe("Ad Account Management", () => {
                     id: accountId,
                     tenantId,
                     isSelected: true,
-                };
+                    lastSyncAt: null,
+                    lastSyncError: null,                };
             }),
         } as unknown as AdAccountRepository;
 

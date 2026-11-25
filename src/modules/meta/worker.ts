@@ -9,6 +9,8 @@ import {
 import {MetaService} from "./service";
 import {PixelStatsSyncService} from "./pixel-stats.service";
 import {MetaSyncDeadLetter} from "./dead-letter";
+import {MetaTokenRefreshService} from "./token-refresh.service";
+import {PurchaseReconciliationService} from "@/modules/reports/reconciliation.service";
 import {MetaConnectionRepository} from "@db/repositories/meta-connection.repository";
 import {AdAccountRepository} from "@db/repositories/ad-account.repository";
 import {AggregationCache} from "@infra/cache";
@@ -21,7 +23,9 @@ export class MetaSyncWorkerProcessor {
         private readonly adAccountRepo = new AdAccountRepository(),
         private readonly pixelStatsService = new PixelStatsSyncService(),
         private readonly cache = new AggregationCache(),
-        private readonly deadLetter = new MetaSyncDeadLetter()
+        private readonly deadLetter = new MetaSyncDeadLetter(),
+        private readonly tokenRefresh = new MetaTokenRefreshService(),
+        private readonly reconciliation = new PurchaseReconciliationService()
     ) {}
 
     async process(job: Job<MetaSyncJobData, void, MetaSyncJobName>): Promise<void> {
@@ -38,6 +42,10 @@ export class MetaSyncWorkerProcessor {
                 await this.handleHourlyBreakdownSync(job.data as MetaSyncHourlyBreakdownsJobPayload);
             } else if (job.name === "sync-pixel-stats") {
                 await this.handlePixelStatsSync(job.data);
+            } else if (job.name === "refresh-meta-tokens") {
+                await this.tokenRefresh.refreshExpiring();
+            } else if (job.name === "reconcile-purchases") {
+                await this.reconciliation.reconcileAll();
             } else {
                 logger.warn({jobName: job.name}, "Unknown Meta sync job name");
             }
@@ -69,11 +77,7 @@ export class MetaSyncWorkerProcessor {
         const until = today.toISOString().slice(0, 10);
 
         for (const target of targets) {
-            await this.metaService.syncInsights(
-                {iss: target.userId, tenantId: target.tenantId},
-                {accountId: target.accountId, since, until, includeBreakdowns: true}
-            );
-            await this.refreshAfterSync(target.accountId);
+            await this.syncInsightsFor(target, {since, until});
         }
     }
 
@@ -86,21 +90,25 @@ export class MetaSyncWorkerProcessor {
         const until = today.toISOString().slice(0, 10);
 
         for (const target of targets) {
-            await this.metaService.syncInsights(
-                {iss: target.userId, tenantId: target.tenantId},
-                {accountId: target.accountId, since, until, includeBreakdowns: true}
-            );
-            await this.refreshAfterSync(target.accountId);
+            await this.syncInsightsFor(target, {since, until});
         }
     }
 
-    /**
-     * Fresh numbers make every cached aggregation of the account wrong, and the `sync_failed` alert the
-     * dead letter opened obsolete. Both are best-effort: the sync already succeeded.
-     */
-    async refreshAfterSync(accountId: string): Promise<void> {
-        await this.cache.invalidateAccount(accountId);
-        await this.deadLetter.clearAlert(accountId);
+    /** One insight sync with its bookkeeping: success clears the account error, failure records it. */
+    private async syncInsightsFor(
+        target: {userId: string; tenantId: string; accountId: string},
+        range: {since: string; until: string}
+    ): Promise<void> {
+        try {
+            await this.metaService.syncInsights(
+                {iss: target.userId, tenantId: target.tenantId},
+                {accountId: target.accountId, ...range, includeBreakdowns: true}
+            );
+            await this.refreshAfterSync(target.accountId);
+        } catch (error) {
+            await this.recordSyncFailure(target.accountId, error instanceof Error ? error.message : String(error));
+            throw error;
+        }
     }
 
     private async handleHourlyBreakdownSync(data: MetaSyncHourlyBreakdownsJobPayload): Promise<void> {
@@ -131,6 +139,22 @@ export class MetaSyncWorkerProcessor {
                 {accountId: target.accountId}
             );
         }
+    }
+
+    /**
+     * After a successful insight sync: fresh numbers invalidate every cached aggregation, the failure
+     * alert the dead letter opened is obsolete, and `ad_accounts` records the run so `/api/sources` can
+     * answer without scanning `sync_runs`. All best-effort — the sync itself already succeeded.
+     */
+    async refreshAfterSync(accountId: string): Promise<void> {
+        await this.cache.invalidateAccount(accountId);
+        await this.deadLetter.clearAlert(accountId);
+        await this.adAccountRepo.recordSyncOutcome(accountId, {at: new Date(), error: null});
+    }
+
+    /** A failed run leaves its message on the account: that is what `/api/sources` reports as lastError. */
+    async recordSyncFailure(accountId: string, message: string): Promise<void> {
+        await this.adAccountRepo.recordSyncOutcome(accountId, {at: null, error: message});
     }
 
     private async resolveSyncTargets(data: MetaSyncJobData): Promise<{ userId: string; tenantId: string; accountId: string }[]> {

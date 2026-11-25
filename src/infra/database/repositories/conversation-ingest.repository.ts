@@ -1,4 +1,6 @@
 import {and, eq, sql} from "drizzle-orm";
+import {createHash} from "node:crypto";
+import {encrypt} from "@shared/crypto";
 import {DatabaseRepository, type DatabaseTransaction} from "./base.repository";
 import {LeadEntity} from "@db/schema/wa/lead.entity";
 import {ConversationMessageEntity} from "@db/schema/wa/conversation-message.entity";
@@ -8,6 +10,15 @@ export interface IngestAttribution {
     adsetId: string | null;
     adId: string | null;
     creativeId: string | null;
+    /** The click id from the CTWA referral: the proof the chat came from an ad. */
+    ctwaClid: string | null;
+    method: "ctwa_referral" | "form" | "manual" | "unknown";
+    confidence: "rendah" | "sedang" | "tinggi";
+}
+
+export interface IngestConversation {
+    /** Cloud API conversation id when the payload has one, else a stable 24-hour bucket per lead. */
+    conversationId: string | null;
 }
 
 export interface IngestInboundInput {
@@ -23,6 +34,8 @@ export interface IngestInboundInput {
     sentAt: Date;
     attribution: IngestAttribution | null;
     attributionNote: string | null;
+    /** Cloud API conversation id; the repository derives a daily bucket when it is absent. */
+    conversationId?: string | null;
 }
 
 export interface IngestOutboundInput {
@@ -36,6 +49,8 @@ export interface IngestOutboundInput {
     wamid: string;
     contextWamid: string | null;
     sentAt: Date;
+    /** Cloud API conversation id; the repository derives a daily bucket when it is absent. */
+    conversationId?: string | null;
 }
 
 /** `messageId` is `null` when the `(lead_id, wamid)` row already existed. */
@@ -67,6 +82,9 @@ export class ConversationIngestRepository extends DatabaseRepository {
                     adId: input.attribution?.adId ?? null,
                     creativeId: input.attribution?.creativeId ?? null,
                     attributionNote: input.attributionNote,
+                    ctwaClid: input.attribution?.ctwaClid ?? null,
+                    attributionMethod: input.attribution?.method ?? "unknown",
+                    attributionConfidence: input.attribution?.confidence ?? "rendah",
                 })
                 .onConflictDoNothing({
                     target: [LeadEntity.accountId, LeadEntity.externalId],
@@ -82,7 +100,9 @@ export class ConversationIngestRepository extends DatabaseRepository {
                     contextWamid: input.contextWamid,
                     direction: "INBOUND",
                     senderRole: "LEAD",
-                    body: input.body,
+                    body: null,
+                    bodyEncrypted: input.body === null ? null : encrypt(input.body),
+                    conversationId: conversationIdFor(leadId, input.sentAt, input.conversationId),
                     sentAt: input.sentAt,
                 })
                 .onConflictDoNothing({
@@ -121,7 +141,9 @@ export class ConversationIngestRepository extends DatabaseRepository {
                     contextWamid: input.contextWamid,
                     direction: "OUTBOUND",
                     senderRole: "CS",
-                    body: input.body,
+                    body: null,
+                    bodyEncrypted: input.body === null ? null : encrypt(input.body),
+                    conversationId: conversationIdFor(leadId, input.sentAt, input.conversationId),
                     sentAt: input.sentAt,
                 })
                 .onConflictDoNothing({
@@ -163,6 +185,24 @@ export class ConversationIngestRepository extends DatabaseRepository {
             return {leadId, messageId: message.id};
         });
     }
+}
+
+/**
+ * Cloud API conversation id when the payload carries one, otherwise a deterministic 24-hour bucket per
+ * lead: the same day of chat groups together, and a returning customer next week starts a new one.
+ * The value is a UUID so the column type and its index stay honest.
+ */
+function conversationIdFor(leadId: number, sentAt: Date, provided: string | null | undefined): string {
+    const source = provided ?? `${leadId}:${Math.floor(sentAt.getTime() / 86_400_000)}`;
+    const hex = createHash("sha256").update(source).digest("hex");
+
+    return [
+        hex.slice(0, 8),
+        hex.slice(8, 12),
+        `5${hex.slice(13, 16)}`,
+        `8${hex.slice(17, 20)}`,
+        hex.slice(20, 32),
+    ].join("-");
 }
 
 /** `onConflictDoNothing` returns no row for an existing lead; the id is then read back. */

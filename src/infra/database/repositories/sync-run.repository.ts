@@ -16,12 +16,14 @@ export class SyncRunRepository extends DatabaseRepository {
         return entity;
     }
 
-    async complete(id: number, rowsSynced: number): Promise<void> {
+    /** `rowsSkipped` counts pages a stored cursor let the run resume past instead of re-walking. */
+    async complete(id: number, rowsSynced: number, rowsSkipped: number = 0): Promise<void> {
         await this.database.update(SyncRunEntity)
             .set({
                 status: "SUCCESS",
                 finishedAt: new Date(),
                 rowsUpserted: rowsSynced,
+                rowsSkipped,
             })
             .where(eq(SyncRunEntity.id, id));
     }

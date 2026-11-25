@@ -1,8 +1,10 @@
+import type {SourceStatus} from "@shared/sources";
+
 /**
  * `GET /api/settings` takes no query: the workspace is resolved from the bearer token alone. The
  * response contract lives here so the controller and the service share one shape.
  */
-export type SettingsSourceStatus = "connected" | "disconnected" | "expired" | "out_of_scope";
+export type SettingsSourceStatus = SourceStatus;
 
 export interface SettingsSource {
     key: "meta" | "whatsapp";

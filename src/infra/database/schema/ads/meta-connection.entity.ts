@@ -9,7 +9,10 @@ export const MetaConnectionEntity = pgTable("meta_connection", {
     tenantId: uuid("tenant_id").references(() => TenantEntity.id, {onDelete: "cascade"}).notNull(),
     metaUserId: varchar("meta_user_id", {length: 64}).notNull(),
     metaUserName: varchar("meta_user_name", {length: 200}),
+    /** AES-256-GCM ciphertext from `@shared/crypto`; never written or read in plaintext outside the repository. */
     accessToken: text("access_token").notNull(),
+    refreshToken: text("refresh_token"),
+    tokenRefreshedAt: timestamp("token_refreshed_at", {withTimezone: true}),
     scopes: text("scopes").array().notNull(),
     expiresAt: timestamp("expires_at", {withTimezone: true}),
     createdAt: timestamp("created_at", {withTimezone: true}).defaultNow().notNull(),

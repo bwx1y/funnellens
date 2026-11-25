@@ -87,6 +87,17 @@ export class AdAccountRepository extends DatabaseRepository {
             .returning();
     }
 
+    /** Written by the sync worker after each run; `/api/sources` reads it instead of scanning `sync_runs`. */
+    async recordSyncOutcome(accountId: string, outcome: {at: Date | null; error: string | null}): Promise<void> {
+        await this.database.update(AdAccountEntity)
+            .set({
+                ...(outcome.at === null ? {} : {lastSyncAt: outcome.at}),
+                lastSyncError: outcome.error,
+                updatedAt: new Date(),
+            })
+            .where(eq(AdAccountEntity.id, accountId));
+    }
+
     async selectAccount(tenantId: string, accountId: string): Promise<typeof AdAccountEntity.$inferSelect | null> {
         return this.database.transaction(async (tx) => {
             await tx.update(AdAccountEntity)

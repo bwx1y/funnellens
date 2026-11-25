@@ -74,7 +74,8 @@ function toCounts(meta: FunnelCounts, leads: LeadStageCounts): FunnelCountsLike 
     };
 }
 
-function readStages(counts: FunnelCountsLike): {key: FunnelStageKey; value: number}[] {
+/** The `wa` stages are all reported counts, so a null here means the funnel has no numbers at all. */
+function readStages(counts: FunnelCountsLike): {key: FunnelStageKey; value: number | null}[] {
     return FUNNEL_STAGES.wa.map((definition) => ({key: definition.key, value: definition.read(counts)}));
 }
 

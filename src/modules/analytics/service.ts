@@ -18,6 +18,7 @@ import {
     FUNNEL_STAGES,
     buildFunnelPairs,
     leakageCaption,
+    missingEventNote,
     pickLeakage,
     pickPriorityStage,
     stageChannel,
@@ -52,6 +53,12 @@ const EMPTY_FUNNEL_COUNTS: FunnelCountsLike = {
     qualified: 0,
     closed: 0,
 };
+
+/** `null + n = n`, `null + null = null`: a counter stays "not reported" until a row reports it. */
+function addNullable(total: number | null, value: number | null): number | null {
+    if (value === null) return total;
+    return (total ?? 0) + value;
+}
 
 /** The inspection steps a human runs when a stage drops; grouped by what is actually checked. */
 const STAGE_CHECK_GROUPS = {
@@ -189,16 +196,18 @@ export interface StageDetailQuery {
 export interface FunnelStageView {
     key: FunnelStageKey;
     label: string;
-    value: number;
+    /** `null` when Meta never reported the event in this period: a gap, not a zero. */
+    value: number | null;
     /** Same stage in the previous period; `0` when that period had none. */
-    previousValue: number;
-    changeCount: number;
+    previousValue: number | null;
+    changeCount: number | null;
     source: FunnelStageSource;
     estimated?: true;
     /** Nilai tahap dibagi tayangan pada periode berjalan; bukan pembanding lintas periode. */
     rateFromFirst: number | null;
     /** `value / stages[0].value`, 4 decimals; `null` when the first stage is 0. */
     share: number | null;
+    note?: string;
 }
 
 export interface FunnelResponse {
@@ -272,8 +281,8 @@ export interface LeakHistoryResponse {
 export interface StageComparisonRow {
     stageKey: FunnelStageKey;
     label: string;
-    current: number;
-    previous: number;
+    current: number | null;
+    previous: number | null;
     changePct: number | null;
     direction: DeltaDirection | null;
     conversionRate: number | null;
@@ -466,8 +475,15 @@ export class AnalyticsService {
             cplCard.note = "Perbandingan tidak tersedia karena periode sebelumnya tanpa lead qualified.";
         }
 
-        const roas = current.spendMinor > 0 ? round4(current.purchaseValueMinor / current.spendMinor) : null;
-        const previousRoas = previous.spendMinor > 0 ? round4(previous.purchaseValueMinor / previous.spendMinor) : null;
+        // ROAS is only meaningful when Meta reported purchases at all; a zero purchase value would
+        // render as a real 0,00x and read as "the ads sold nothing" instead of "no data".
+        const purchasesAvailable = current.purchase !== null;
+        const roas = purchasesAvailable && current.spendMinor > 0
+            ? round4(current.purchaseValueMinor / current.spendMinor)
+            : null;
+        const previousRoas = purchasesAvailable && previous.spendMinor > 0
+            ? round4(previous.purchaseValueMinor / previous.spendMinor)
+            : null;
         const roasDelta = roas !== null && previousRoas !== null ? percentChange(roas, previousRoas) : null;
         const roasCard: KpiCard = {
             value: roas,
@@ -475,7 +491,9 @@ export class AnalyticsService {
             direction: direction(roasDelta),
             sparkline: roasSparkline,
         };
-        if (roas === null) {
+        if (!purchasesAvailable) {
+            roasCard.note = "Event purchase tidak tersedia pada periode ini.";
+        } else if (roas === null) {
             roasCard.note = "Belanja iklan nol pada periode ini";
         } else if (roasDelta === null) {
             roasCard.note = "Perbandingan tidak tersedia karena periode sebelumnya tanpa belanja.";
@@ -633,17 +651,23 @@ export class AnalyticsService {
         const stages: FunnelStageView[] = FUNNEL_STAGES[objectiveGroup].map((definition, index) => {
             const value = funnel.stages[index].value;
             const previousValue = funnel.previousStages[index].value;
+            const ratio = (numerator: number | null): number | null =>
+                numerator === null || impressions === null || impressions <= 0
+                    ? null
+                    : round4(numerator / impressions);
 
             return {
                 key: definition.key,
                 label: definition.label,
                 value,
                 previousValue,
-                changeCount: value - previousValue,
+                changeCount: value === null || previousValue === null ? null : value - previousValue,
                 source: definition.source,
                 ...(definition.estimated === true ? {estimated: true as const} : {}),
-                rateFromFirst: impressions > 0 ? round4(value / impressions) : null,
-                share: impressions > 0 ? round4(value / impressions) : null,
+                rateFromFirst: ratio(value),
+                share: ratio(value),
+                // A stage Meta never reported says so instead of showing a zero.
+                ...(value === null ? {note: missingEventNote(definition.key)} : {}),
             };
         });
 
@@ -1014,8 +1038,8 @@ export class AnalyticsService {
         prevEnd: Date;
         trackingState: TrackingState;
     }): Promise<{
-        stages: {key: FunnelStageKey; value: number}[];
-        previousStages: {key: FunnelStageKey; value: number}[];
+        stages: {key: FunnelStageKey; value: number | null}[];
+        previousStages: {key: FunnelStageKey; value: number | null}[];
         pairs: FunnelPair[];
         sample: SampleBlock;
     }> {
@@ -1060,9 +1084,9 @@ export class AnalyticsService {
             previousStages,
             pairs: buildFunnelPairs(stages, previousStages, trackingState),
             sample: {
-                n: stages[0].value,
+                n: stages[0].value ?? 0,
                 denominator: 100,
-                eligible: stages[0].value >= 100,
+                eligible: (stages[0].value ?? 0) >= 100,
                 gate: "≥ 100 tayangan",
             },
         };
@@ -1094,14 +1118,20 @@ export class AnalyticsService {
         ]);
 
         const counts: FunnelCountsLike = {...EMPTY_FUNNEL_COUNTS};
+        // The four web event counters start at `null` and only become numbers once a row reports them:
+        // summing into a zero would turn "never reported" into "reported zero".
+        counts.lpv = null;
+        counts.viewContent = null;
+        counts.addToCart = null;
+        counts.purchase = null;
         for (const row of metaRows) {
             counts.impressions += row.impressions;
             counts.linkClicks += row.linkClicks;
             counts.messagingStarted += row.messagingStarted;
-            counts.lpv += row.lpv;
-            counts.viewContent += row.viewContent;
-            counts.addToCart += row.addToCart;
-            counts.purchase += row.purchase;
+            counts.lpv = addNullable(counts.lpv, row.lpv);
+            counts.viewContent = addNullable(counts.viewContent, row.viewContent);
+            counts.addToCart = addNullable(counts.addToCart, row.addToCart);
+            counts.purchase = addNullable(counts.purchase, row.purchase);
         }
         for (const row of leadRows) {
             counts.observed += row.observed;
@@ -1163,12 +1193,16 @@ export class AnalyticsService {
         if (definition.source === "meta") {
             const rows = await this.analyticsRepo.getDailyMetaStages(accountId, start, end, objectiveGroup);
             for (const row of rows) {
-                byDate.set(row.date, definition.read({...EMPTY_FUNNEL_COUNTS, ...row}));
+                // A day where Meta reported no such event contributes no point: a zero would drag the
+                // history average down for a measurement that simply did not happen.
+                const value = definition.read({...EMPTY_FUNNEL_COUNTS, ...row});
+                if (value !== null) byDate.set(row.date, value);
             }
         } else {
             const rows = await this.analyticsRepo.getDailyLeadStages(accountId, start, end);
             for (const row of rows) {
-                byDate.set(row.date, definition.read({...EMPTY_FUNNEL_COUNTS, ...row}));
+                const value = definition.read({...EMPTY_FUNNEL_COUNTS, ...row});
+                if (value !== null) byDate.set(row.date, value);
             }
         }
 
@@ -1217,7 +1251,9 @@ function leakSeverity(deltaPp: number | null): "WARNING" | "CRITICAL" | null {
 }
 
 /** Percent change rounded to 2 decimals; `null` when the previous value is 0 (no usable baseline). */
-function percentChange(current: number, previous: number): number | null {
-    return previous === 0 ? null : Math.round(((current - previous) / previous) * 10000) / 100;
+function percentChange(current: number | null, previous: number | null): number | null {
+    if (current === null || previous === null || previous === 0) return null;
+
+    return Math.round(((current - previous) / previous) * 10000) / 100;
 }
 

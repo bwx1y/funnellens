@@ -1,5 +1,6 @@
 import {Elysia} from "elysia";
 import {JwtUtil} from "@shared/jwt";
+import {ForbiddenError} from "@shared/errors";
 import {AudienceService, resolveLeadPageSize} from "@/modules/audience/service";
 import {AudienceSchema} from "@/modules/audience/schema";
 
@@ -85,6 +86,24 @@ export const LeadController = new Elysia({
             params: AudienceSchema.leadParams,
             detail: {
                 summary: "Get one lead with attribution, metrics, level timeline, and message trail"
+            }
+        })
+    .delete("/:id",
+        async ({user, params: {id}, query, audienceService}) => {
+            if (user.role !== "ADMIN") {
+                throw new ForbiddenError("Only ADMIN can delete a lead");
+            }
+
+            return audienceService.deleteLead(user.tenantId, Number(id), {
+                userId: user.iss,
+                reason: query.reason,
+            });
+        },
+        {
+            params: AudienceSchema.leadParams,
+            query: AudienceSchema.leadDelete,
+            detail: {
+                summary: "Delete a lead and its conversations, assessments, and milestones (ADMIN)"
             }
         })
     .patch("/:id",

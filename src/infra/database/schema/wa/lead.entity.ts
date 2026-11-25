@@ -1,4 +1,4 @@
-import {bigint, bigserial, index, jsonb, pgTable, text, timestamp, uniqueIndex, uuid, varchar} from "drizzle-orm/pg-core";
+import {bigint, bigserial, check, index, jsonb, pgTable, text, timestamp, uniqueIndex, uuid, varchar} from "drizzle-orm/pg-core";
 import {relations, sql} from "drizzle-orm";
 import {AdAccountEntity} from "@db/schema/ads/ad-account.entity";
 import {WaPhoneEntity} from "@db/schema/wa/wa-phone.entity";
@@ -24,6 +24,10 @@ export const LeadEntity = pgTable("leads", {
     sourcePlatform: text("source_platform"),
     sourcePosition: text("source_position"),
     attributionNote: text("attribution_note"),
+    /** Click id from the CTWA referral; the proof that the chat came from an ad, not a guess. */
+    ctwaClid: text("ctwa_clid"),
+    attributionMethod: text("attribution_method"),
+    attributionConfidence: text("attribution_confidence"),
     temperature: leadTemperatureEnum("temperature"),
     stage: leadStageEnum("stage").notNull().default("CHAT_STARTED"),
     sentiment: text("sentiment"),
@@ -41,6 +45,8 @@ export const LeadEntity = pgTable("leads", {
     uqAccountExternal: uniqueIndex("uq_leads_account_external").on(t.accountId, t.externalId),
     /** Trigram index for the `ilike '%q%'` lead search; requires the `pg_trgm` extension. */
     idxNameTrgm: index("idx_leads_name_trgm").using("gin", sql`${t.name} gin_trgm_ops`),
+    attributionMethodCheck: check("chk_leads_attribution_method", sql`${t.attributionMethod} is null or ${t.attributionMethod} in ('ctwa_referral', 'form', 'manual', 'unknown')`),
+    attributionConfidenceCheck: check("chk_leads_attribution_confidence", sql`${t.attributionConfidence} is null or ${t.attributionConfidence} in ('rendah', 'sedang', 'tinggi')`),
 }));
 
 export const LeadRelationship = relations(LeadEntity, ({one}) => ({

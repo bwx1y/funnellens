@@ -104,6 +104,12 @@ export const AudienceSchema = {
             description: "Sort direction, defaults to desc",
         })),
     }),
+    leadDelete: t.Object({
+        reason: t.Optional(t.String({
+            maxLength: 500,
+            description: "Why the lead was erased; stored in deletion_audit",
+        })),
+    }),
     leadUpdate: t.Object({
         stage: t.Optional(stage),
         temperature: t.Optional(temperature),

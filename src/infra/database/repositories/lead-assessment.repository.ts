@@ -253,12 +253,15 @@ export class LeadAssessmentRepository extends DatabaseRepository {
         firstRepliedAt: Date | null;
         warmAt: Date | null;
         hotAt: Date | null;
+        attributionMethod: string | null;
+        attributionConfidence: string | null;
     }[]> {
         const rows = await this.database.execute(sql`
             select l.id as lead_id, l.name, l.phone_masked,
                    a.level, a.confidence, a.reason,
                    a.evidence->>'wamid' as evidence_wamid,
                    l.stage, l.ad_id, l.creative_id, l.first_seen_at, l.first_replied_at,
+                   l.attribution_method, l.attribution_confidence,
                    mw.first_at as warm_at, mh.first_at as hot_at
             from leads l
             join lateral (
@@ -289,6 +292,8 @@ export class LeadAssessmentRepository extends DatabaseRepository {
             first_replied_at: Date | string | null;
             warm_at: Date | string | null;
             hot_at: Date | string | null;
+            attribution_method: string | null;
+            attribution_confidence: string | null;
         }[];
 
         return rows.map((row) => ({
@@ -306,6 +311,8 @@ export class LeadAssessmentRepository extends DatabaseRepository {
             firstRepliedAt: row.first_replied_at === null ? null : new Date(row.first_replied_at),
             warmAt: row.warm_at === null ? null : new Date(row.warm_at),
             hotAt: row.hot_at === null ? null : new Date(row.hot_at),
+            attributionMethod: row.attribution_method,
+            attributionConfidence: row.attribution_confidence,
         }));
     }
 }

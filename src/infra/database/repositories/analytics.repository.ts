@@ -9,10 +9,11 @@ export interface FunnelCounts {
     impressions: number;
     /** `inline_link_clicks`: the denominator of the funnel conversion ratio. */
     linkClicks: number;
-    lpv: number;
-    viewContent: number;
-    addToCart: number;
-    purchase: number;
+    /** `null` when Meta never reported the event in the window; never a stand-in zero. */
+    lpv: number | null;
+    viewContent: number | null;
+    addToCart: number | null;
+    purchase: number | null;
     messagingStarted: number;
     /** Objective-aware conversions from the `ad_insight_metrics` view (`leads` for WA, `purchases` for web). */
     results: number;
@@ -87,10 +88,10 @@ interface FunnelRow {
     spend_minor: string;
     impressions: string;
     link_clicks: string;
-    lpv: string;
-    view_content: string;
-    add_to_cart: string;
-    purchase: string;
+    lpv: string | null;
+    view_content: string | null;
+    add_to_cart: string | null;
+    purchase: string | null;
     messaging_started: string;
     results: string;
     purchase_value_minor: string;
@@ -115,10 +116,10 @@ interface DailyMetaStageRow {
     impressions: string;
     link_clicks: string;
     messaging_started: string;
-    lpv: string;
-    view_content: string;
-    add_to_cart: string;
-    purchase: string;
+    lpv: string | null;
+    view_content: string | null;
+    add_to_cart: string | null;
+    purchase: string | null;
 }
 
 interface DailyLeadStageRow {
@@ -250,10 +251,10 @@ export class AnalyticsRepository extends DatabaseRepository {
                 coalesce(sum(i.spend_minor), 0)            as spend_minor,
                 coalesce(sum(i.impressions), 0)            as impressions,
                 coalesce(sum(i.inline_link_clicks), 0)     as link_clicks,
-                coalesce(sum(i.lpv), 0)                    as lpv,
-                coalesce(sum(i.view_content), 0)           as view_content,
-                coalesce(sum(i.add_to_cart), 0)            as add_to_cart,
-                coalesce(sum(i.purchases), 0)              as purchase,
+                sum(i.lpv)                                 as lpv,
+                sum(i.view_content)                        as view_content,
+                sum(i.add_to_cart)                         as add_to_cart,
+                sum(i.purchases)                           as purchase,
                 coalesce(sum(i.leads), 0)                  as messaging_started,
                 coalesce(sum(i.results), 0)                as results,
                 coalesce(sum(i.purchase_value_minor), 0)   as purchase_value_minor
@@ -266,10 +267,10 @@ export class AnalyticsRepository extends DatabaseRepository {
             spendMinor: Number(row.spend_minor),
             impressions: Number(row.impressions),
             linkClicks: Number(row.link_clicks),
-            lpv: Number(row.lpv),
-            viewContent: Number(row.view_content),
-            addToCart: Number(row.add_to_cart),
-            purchase: Number(row.purchase),
+            lpv: row.lpv === null ? null : Number(row.lpv),
+            viewContent: row.view_content === null ? null : Number(row.view_content),
+            addToCart: row.add_to_cart === null ? null : Number(row.add_to_cart),
+            purchase: row.purchase === null ? null : Number(row.purchase),
             messagingStarted: Number(row.messaging_started),
             results: Number(row.results),
             purchaseValueMinor: Number(row.purchase_value_minor),
@@ -357,20 +358,22 @@ export class AnalyticsRepository extends DatabaseRepository {
         impressions: number;
         linkClicks: number;
         messagingStarted: number;
-        lpv: number;
-        viewContent: number;
-        addToCart: number;
-        purchase: number;
+        lpv: number | null;
+        viewContent: number | null;
+        addToCart: number | null;
+        purchase: number | null;
     }[]> {
         const rows = await this.database.execute(sql`
             select i.date::text                            as date,
                    coalesce(sum(i.impressions), 0)         as impressions,
                    coalesce(sum(i.inline_link_clicks), 0)  as link_clicks,
                    coalesce(sum(i.leads), 0)               as messaging_started,
-                   coalesce(sum(i.lpv), 0)                 as lpv,
-                   coalesce(sum(i.view_content), 0)        as view_content,
-                   coalesce(sum(i.add_to_cart), 0)         as add_to_cart,
-                   coalesce(sum(i.purchases), 0)           as purchase
+                   -- No coalesce: an all-null day means the event was never reported, and 0 would be a
+                   -- different claim. sum ignores nulls, so a reported day still adds up.
+                   sum(i.lpv)                              as lpv,
+                   sum(i.view_content)                     as view_content,
+                   sum(i.add_to_cart)                      as add_to_cart,
+                   sum(i.purchases)                        as purchase
             from ad_insight_metrics i
             where ${this.insightScope(accountId, since, until, {objectiveGroup})}
             group by i.date
@@ -382,10 +385,10 @@ export class AnalyticsRepository extends DatabaseRepository {
             impressions: Number(row.impressions),
             linkClicks: Number(row.link_clicks),
             messagingStarted: Number(row.messaging_started),
-            lpv: Number(row.lpv),
-            viewContent: Number(row.view_content),
-            addToCart: Number(row.add_to_cart),
-            purchase: Number(row.purchase),
+            lpv: row.lpv === null ? null : Number(row.lpv),
+            viewContent: row.view_content === null ? null : Number(row.view_content),
+            addToCart: row.add_to_cart === null ? null : Number(row.add_to_cart),
+            purchase: row.purchase === null ? null : Number(row.purchase),
         }));
     }
 

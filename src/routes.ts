@@ -18,6 +18,7 @@ import {ReportsController} from "@/modules/reports";
 import {SettingsController} from "@/modules/settings";
 import {HealthController} from "@/modules/health";
 import {MetricsController} from "@/modules/metrics";
+import {SourcesController} from "@/modules/sources";
 
 export const routes = new Elysia({
     prefix: "/api"
@@ -42,6 +43,7 @@ export const routes = new Elysia({
     .use(ReportsController)
     .use(SettingsController)
     .use(MetricsController)
+    .use(SourcesController)
     // Registered last and unauthenticated: `/api/healthz` and `/api/readyz` must answer even when
     // the auth layer or a dependency is the thing that is broken.
     .use(HealthController);

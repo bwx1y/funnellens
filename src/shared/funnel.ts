@@ -22,14 +22,19 @@ export type FunnelPairStatus = "normal" | "perlu_perhatian" | "kritis";
 
 export type TrackingState = "up_to_date" | "stale" | "unknown";
 
+/**
+ * `null` means Meta never reported that event for the period — not that the count was zero. The view
+ * keeps `NULL` for the web event stages precisely so a missing pixel event cannot masquerade as a real
+ * zero and drag every downstream ratio with it.
+ */
 export interface FunnelCountsLike {
     impressions: number;
     linkClicks: number;
     messagingStarted: number;
-    lpv: number;
-    viewContent: number;
-    addToCart: number;
-    purchase: number;
+    lpv: number | null;
+    viewContent: number | null;
+    addToCart: number | null;
+    purchase: number | null;
     observed: number;
     replied: number;
     qualified: number;
@@ -42,7 +47,7 @@ export interface StageDefinition {
     source: FunnelStageSource;
     /** The stage counts leads FunnelLens observed, not a number Meta reported. */
     estimated?: true;
-    read: (counts: FunnelCountsLike) => number;
+    read: (counts: FunnelCountsLike) => number | null;
 }
 
 /**
@@ -94,6 +99,11 @@ export interface FunnelPair {
 const RATIO_NOTE = "Rasio tidak tersedia karena salah satu periode tidak memiliki angka pada tahap sebelumnya.";
 const GATE_NOTE = "Gerbang sampel belum terpenuhi sehingga perbandingan belum dapat diandalkan.";
 
+/** Shown on a stage whose event Meta never reported: a gap, not a zero. */
+export function missingEventNote(key: FunnelStageKey): string {
+    return `Event ${key} tidak tersedia pada periode ini.`;
+}
+
 /** Meta volumes need a larger gate than the small lead cohorts that follow the click. */
 const HIGH_VOLUME_STAGES: FunnelStageKey[] = ["impressions", "link_clicks"];
 const HIGH_VOLUME_GATE = 100;
@@ -113,22 +123,47 @@ function gateFor(from: FunnelStageKey): {threshold: number; gate: string} {
 export function computePair(args: {
     from: FunnelStageKey;
     to: FunnelStageKey;
-    current: {before: number; after: number};
-    previous: {before: number; after: number};
+    current: {before: number | null; after: number | null};
+    previous: {before: number | null; after: number | null};
     trackingState: TrackingState;
 }): FunnelPair {
     const {from, to, current, previous, trackingState} = args;
     const {threshold, gate} = gateFor(from);
 
-    const eligible = current.before >= threshold
+    const before = current.before;
+    const after = current.after;
+
+    // A null side means the event was never reported, so no ratio exists at all: the pair keeps nulls,
+    // fails the sample gate, and says which event is missing instead of implying a zero.
+    if (before === null || after === null) {
+        return {
+            from,
+            to,
+            rate: null,
+            baseline: null,
+            deltaPp: null,
+            direction: null,
+            estimatedGap: null,
+            status: null,
+            eligible: false,
+            sample: {n: after ?? 0, denominator: before ?? 0, eligible: false, gate},
+            note: missingEventNote(before === null ? from : to),
+        };
+    }
+
+    const eligible = previous.before !== null
+        && previous.after !== null
+        && before >= threshold
         && previous.before >= threshold
         && trackingState === "up_to_date";
 
-    const rate = current.before > 0 ? round4(current.after / current.before) : null;
-    const baseline = previous.before > 0 ? round4(previous.after / previous.before) : null;
+    const rate = before > 0 ? round4(after / before) : null;
+    const baseline = previous.before !== null && previous.after !== null && previous.before > 0
+        ? round4(previous.after / previous.before)
+        : null;
     const deltaPp = rate !== null && baseline !== null ? round2(100 * (rate - baseline)) : null;
     const estimatedGap = rate !== null && baseline !== null
-        ? Math.max(0, Math.round(current.before * baseline - current.after))
+        ? Math.max(0, Math.round(before * baseline - after))
         : null;
 
     const pair: FunnelPair = {
@@ -141,7 +176,7 @@ export function computePair(args: {
         estimatedGap,
         status: pairStatus(deltaPp),
         eligible,
-        sample: {n: current.after, denominator: current.before, eligible, gate},
+        sample: {n: after, denominator: before, eligible, gate},
     };
 
     if (deltaPp === null) {
@@ -155,8 +190,8 @@ export function computePair(args: {
 
 /** Consecutive stages of one channel; `previous` is looked up by key, a missing stage counts as 0. */
 export function buildFunnelPairs(
-    current: {key: FunnelStageKey; value: number}[],
-    previous: {key: FunnelStageKey; value: number}[],
+    current: {key: FunnelStageKey; value: number | null}[],
+    previous: {key: FunnelStageKey; value: number | null}[],
     trackingState: TrackingState
 ): FunnelPair[] {
     const previousByKey = new Map(previous.map((stage) => [stage.key, stage.value]));
@@ -169,7 +204,11 @@ export function buildFunnelPairs(
             from: before.key,
             to: after.key,
             current: {before: before.value, after: after.value},
-            previous: {before: previousByKey.get(before.key) ?? 0, after: previousByKey.get(after.key) ?? 0},
+            // A stage the previous period did not report stays `null`; only an absent key becomes 0.
+            previous: {
+                before: previousByKey.get(before.key) ?? 0,
+                after: previousByKey.get(after.key) ?? 0,
+            },
             trackingState,
         }));
     }

@@ -37,6 +37,23 @@ export const ReportsSchema = {
             description: "Optional campaign filter",
         })),
     }),
+    recordedOrders: t.Object({
+        date: t.String({
+            pattern: "^\\d{4}-\\d{2}-\\d{2}$",
+            description: "Business day (YYYY-MM-DD)",
+        }),
+        orders: t.Integer({
+            minimum: 0,
+            description: "Orders actually booked that day",
+        }),
+        revenueMinor: t.Integer({
+            minimum: 0,
+            description: "Revenue in minor units (sen)",
+        }),
+    }),
+    recordedOrdersQuery: t.Object({
+        accountId,
+    }),
     exports: t.Object({
         accountId: t.Optional(t.String({
             description: "Optional account filter on the recorded export parameters",

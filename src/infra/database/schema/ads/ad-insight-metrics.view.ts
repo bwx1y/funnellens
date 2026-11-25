@@ -26,11 +26,11 @@ export const AD_INSIGHT_METRICS_SQL = sql`
            i.inline_link_clicks                  as inline_link_clicks,
            coalesce(s.objective_group, 'web')    as objective_group,
            coalesce(per.leads, 0)                as leads,
-           coalesce(per.purchases, 0)            as purchases,
+           per.purchases                         as purchases,
            coalesce(per.purchase_value_minor, 0) as purchase_value_minor,
-           coalesce(per.lpv, 0)                  as lpv,
-           coalesce(per.view_content, 0)         as view_content,
-           coalesce(per.add_to_cart, 0)          as add_to_cart,
+           per.lpv                               as lpv,
+           per.view_content                      as view_content,
+           per.add_to_cart                       as add_to_cart,
            coalesce(case when coalesce(s.objective_group, 'web') = 'wa'
                          then per.leads
                          else per.purchases
@@ -44,21 +44,23 @@ export const AD_INSIGHT_METRICS_SQL = sql`
                         max(a.count) filter (where a.action_type = 'onsite_conversion.lead_grouped'),
                         max(a.count) filter (where a.action_type = 'offsite_conversion.fb_pixel_lead'),
                         0) as leads,
+               -- No trailing coalesce(..., 0): a missing event row means "not reported", and a zero
+               -- would be indistinguishable from a real zero in every downstream ratio.
                coalesce(max(a.count) filter (where a.action_type = 'purchase'),
                         max(a.count) filter (where a.action_type = 'omni_purchase'),
-                        max(a.count) filter (where a.action_type = 'offsite_conversion.fb_pixel_purchase'),
-                        0) as purchases,
+                        max(a.count) filter (where a.action_type = 'offsite_conversion.fb_pixel_purchase'))
+                   as purchases,
                coalesce(max(a.value_minor) filter (where a.action_type = 'purchase'),
                         max(a.value_minor) filter (where a.action_type = 'omni_purchase'),
                         max(a.value_minor) filter (where a.action_type = 'offsite_conversion.fb_pixel_purchase'),
                         0) as purchase_value_minor,
-               coalesce(max(a.count) filter (where a.action_type = 'landing_page_view'), 0) as lpv,
+               max(a.count) filter (where a.action_type = 'landing_page_view') as lpv,
                coalesce(max(a.count) filter (where a.action_type = 'view_content'),
-                        max(a.count) filter (where a.action_type = 'offsite_conversion.fb_pixel_view_content'),
-                        0) as view_content,
+                        max(a.count) filter (where a.action_type = 'offsite_conversion.fb_pixel_view_content'))
+                   as view_content,
                coalesce(max(a.count) filter (where a.action_type = 'add_to_cart'),
-                        max(a.count) filter (where a.action_type = 'offsite_conversion.fb_pixel_add_to_cart'),
-                        0) as add_to_cart
+                        max(a.count) filter (where a.action_type = 'offsite_conversion.fb_pixel_add_to_cart'))
+                   as add_to_cart
         from ad_insight_actions a
         group by a.insight_daily_id
     ) per on per.insight_daily_id = i.id

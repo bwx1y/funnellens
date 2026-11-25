@@ -12,6 +12,9 @@ export const AdAccountEntity = pgTable("ad_accounts", {
     accountStatus: integer("account_status"),
     businessId: text("business_id"),
     isSelected: boolean("is_selected").notNull().default(false),
+    /** Written by the sync worker after each run; drives `SourceStatus` without a `sync_runs` scan. */
+    lastSyncAt: timestamp("last_sync_at", {withTimezone: true}),
+    lastSyncError: text("last_sync_error"),
     createdAt: timestamp("created_at", {withTimezone: true}).defaultNow().notNull(),
     updatedAt: timestamp("updated_at", {withTimezone: true}).defaultNow().notNull(),
 }, (t) => ({

@@ -605,6 +605,8 @@ describe("Audience intelligence", () => {
                 warm: "2026-03-01T02:05:00.000Z",
                 hot: "2026-03-01T02:10:00.000Z",
             },
+            // Leads inserted straight into the table carry no attribution evidence.
+            attribution: {method: null, confidence: null},
             explanation: {
                 id: expect.any(String),
                 context: "lead_detail",

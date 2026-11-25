@@ -230,12 +230,27 @@ export class CloudIngestService {
         referral: CloudReferral | null,
         sentAt: Date
     ): Promise<{attribution: IngestAttribution | null; attributionNote: string | null}> {
+        // No usable referral: the lead is stored as unattributed rather than guessed onto a campaign.
         if (referral?.source_type !== "ad" || !referral.source_id) {
             return {attribution: null, attributionNote: null};
         }
 
         const found = await this.adRepo.findAtTime(accountId, referral.source_id, sentAt);
-        if (found === null) return {attribution: null, attributionNote: null};
+        if (found === null) {
+            // The referral names an ad this workspace does not know: keep the click id as evidence.
+            return {
+                attribution: {
+                    campaignId: null,
+                    adsetId: null,
+                    adId: null,
+                    creativeId: null,
+                    ctwaClid: referral.ctwa_clid ?? referral.source_id,
+                    method: "unknown",
+                    confidence: "rendah",
+                },
+                attributionNote: "ad_tidak_dikenal",
+            };
+        }
 
         return {
             attribution: {
@@ -243,6 +258,10 @@ export class CloudIngestService {
                 adsetId: found.ad.adsetId,
                 adId: found.ad.id,
                 creativeId: found.ad.creativeId,
+                // `ctwa_clid` is the click-level proof; `source_id` is the ad id fallback Meta sends.
+                ctwaClid: referral.ctwa_clid ?? referral.source_id,
+                method: "ctwa_referral",
+                confidence: found.timeMatched ? "tinggi" : "sedang",
             },
             attributionNote: found.timeMatched ? null : "attribution_after_change",
         };

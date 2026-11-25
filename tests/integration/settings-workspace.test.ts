@@ -15,6 +15,7 @@ import {WaSessionEntity} from "@db/schema/wa/wa-session.entity";
 import {LeadEntity} from "@db/schema/wa/lead.entity";
 import {ConversationMessageEntity} from "@db/schema/wa/conversation-message.entity";
 import {JwtUtil} from "@shared/jwt";
+import {encrypt} from "@shared/crypto";
 import {eq} from "drizzle-orm";
 
 class TestCleanupRepository extends DatabaseRepository {
@@ -129,7 +130,7 @@ describe("Settings workspace", () => {
             userId: healthy.userId,
             tenantId: healthy.tenantId,
             metaUserId: `meta_${u}`,
-            accessToken: "token",
+            accessToken: encrypt("token"),
             scopes: ["ads_read"],
             expiresAt: new Date("2027-01-01T00:00:00.000Z"),
         });
@@ -187,7 +188,7 @@ describe("Settings workspace", () => {
             userId: broken.userId,
             tenantId: broken.tenantId,
             metaUserId: `meta_broken_${u}`,
-            accessToken: "token",
+            accessToken: encrypt("token"),
             scopes: ["ads_read"],
             expiresAt: new Date("2026-01-01T00:00:00.000Z"),
         });

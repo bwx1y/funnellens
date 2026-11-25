@@ -8,6 +8,7 @@ import {
     type CsvReport,
 } from "@/modules/reports/service";
 import {ReportsSchema} from "@/modules/reports/schema";
+import {PurchaseReconciliationService} from "@/modules/reports/reconciliation.service";
 
 /**
  * Both CSV routes write their audit row after the body is built and before the response is sent; the
@@ -23,6 +24,7 @@ export const ReportsController = new Elysia({
     }
 })
     .decorate("reportsService", new ReportsService())
+    .decorate("reconciliationService", new PurchaseReconciliationService())
     .use(JwtUtil.isAuthenticated)
     .get("/creative-trend.csv",
         async ({user, query, reportsService}) => {
@@ -60,6 +62,16 @@ export const ReportsController = new Elysia({
             query: ReportsSchema.campaigns,
             detail: {
                 summary: "Download per-campaign spend and results as CSV"
+            }
+        })
+    .post("/recorded-orders",
+        async ({user, query, body, reconciliationService}) =>
+            reconciliationService.recordOrders(user.tenantId, query.accountId, body),
+        {
+            query: ReportsSchema.recordedOrdersQuery,
+            body: ReportsSchema.recordedOrders,
+            detail: {
+                summary: "Record the orders the business actually booked for one day"
             }
         })
     .get("/exports",

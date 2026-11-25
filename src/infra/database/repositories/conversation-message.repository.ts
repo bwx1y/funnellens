@@ -2,6 +2,8 @@ import {DatabaseRepository} from "./base.repository";
 import {ConversationMessageEntity} from "@db/schema/wa/conversation-message.entity";
 import {LeadEntity} from "@db/schema/wa/lead.entity";
 import type {ReplyType, Sentiment} from "@shared/audience";
+import {decrypt} from "@shared/crypto";
+import {logger} from "@shared/logger";
 import {and, desc, eq, gte, inArray, isNotNull, lte, sql} from "drizzle-orm";
 
 export type ConversationMessage = typeof ConversationMessageEntity.$inferSelect;
@@ -24,6 +26,22 @@ export interface PairInput {
  * "first measured response" is the earliest row per lead with a non-null, non-negative
  * `response_seconds`.
  */
+/**
+ * The transcript is served from `bodyEncrypted`; `body` is only populated for rows written before the
+ * encryption backfill. A payload that fails to decrypt is logged and shown as `null` rather than
+ * failing the whole trail — one corrupt row must not hide a conversation.
+ */
+function withPlainBody(row: ConversationMessage): ConversationMessage {
+    if (row.bodyEncrypted === null) return row;
+
+    try {
+        return {...row, body: decrypt(row.bodyEncrypted)};
+    } catch (error) {
+        logger.warn({err: error, messageId: row.id}, "conversation body decrypt failed");
+        return {...row, body: null};
+    }
+}
+
 export class ConversationMessageRepository extends DatabaseRepository {
     async findById(id: number): Promise<ConversationMessage | null> {
         const [entity] = await this.database.select()
@@ -31,7 +49,7 @@ export class ConversationMessageRepository extends DatabaseRepository {
             .where(eq(ConversationMessageEntity.id, id))
             .limit(1);
 
-        return entity ?? null;
+        return entity === undefined ? null : withPlainBody(entity);
     }
 
     /** Oldest-first context window ending at `until` (inclusive), capped at `limit` messages. */
@@ -45,7 +63,7 @@ export class ConversationMessageRepository extends DatabaseRepository {
             .orderBy(desc(ConversationMessageEntity.sentAt), desc(ConversationMessageEntity.id))
             .limit(limit);
 
-        return rows.reverse();
+        return rows.reverse().map(withPlainBody);
     }
 
     /** The newest `limit` messages of one lead, still oldest-first for a transcript. */
@@ -56,7 +74,7 @@ export class ConversationMessageRepository extends DatabaseRepository {
             .orderBy(desc(ConversationMessageEntity.sentAt), desc(ConversationMessageEntity.id))
             .limit(limit);
 
-        return rows.reverse();
+        return rows.reverse().map(withPlainBody);
     }
 
     /** Newest non-null topic per lead: the search result shows the last thing the lead talked about. */

@@ -2,6 +2,9 @@ import {DatabaseRepository} from "./base.repository";
 import {LeadEntity} from "@db/schema/wa/lead.entity";
 import {LeadAssessmentEntity} from "@db/schema/wa/lead-assessment.entity";
 import {AdAccountEntity} from "@db/schema/ads/ad-account.entity";
+import {ConversationMessageEntity} from "@db/schema/wa/conversation-message.entity";
+import {LeadMilestoneEntity} from "@db/schema/wa/lead-milestone.entity";
+import {DeletionAuditEntity} from "@db/schema/ads/deletion-audit.entity";
 import {and, asc, desc, eq, gte, ilike, isNull, lte, or, sql} from "drizzle-orm";
 
 export type Lead = typeof LeadEntity.$inferSelect;
@@ -333,6 +336,40 @@ export class LeadRepository extends DatabaseRepository {
             .limit(1);
 
         return row?.lead ?? null;
+    }
+
+    /**
+     * Deletes one lead with everything hanging off it, and records who asked. The audit row survives the
+     * lead on purpose: an erasure request needs a receipt, not a cascade.
+     */
+    async deleteForTenant(
+        tenantId: string,
+        id: number,
+        actor: {userId: string; reason: string | null}
+    ): Promise<boolean> {
+        return this.database.transaction(async (tx) => {
+            const [lead] = await tx.select({id: LeadEntity.id})
+                .from(LeadEntity)
+                .innerJoin(AdAccountEntity, eq(AdAccountEntity.id, LeadEntity.accountId))
+                .where(and(eq(LeadEntity.id, id), eq(AdAccountEntity.tenantId, tenantId)))
+                .limit(1);
+
+            if (lead === undefined) return false;
+
+            await tx.delete(ConversationMessageEntity).where(eq(ConversationMessageEntity.leadId, id));
+            await tx.delete(LeadAssessmentEntity).where(eq(LeadAssessmentEntity.leadId, id));
+            await tx.delete(LeadMilestoneEntity).where(eq(LeadMilestoneEntity.leadId, id));
+            await tx.delete(LeadEntity).where(eq(LeadEntity.id, id));
+
+            await tx.insert(DeletionAuditEntity).values({
+                tenantId,
+                userId: actor.userId,
+                leadId: id,
+                reason: actor.reason,
+            });
+
+            return true;
+        });
     }
 
     /** Current temperature split of the period's leads; `unassessed` counts rows without a level. */

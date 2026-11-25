@@ -11,6 +11,8 @@ export const SyncRunEntity = pgTable("sync_runs", {
     finishedAt: timestamp("finished_at", {withTimezone: true}),
     status: syncRunStatusEnum("status").notNull().default("RUNNING"),
     rowsUpserted: bigint("rows_upserted", {mode: "number"}),
+    /** Rows that a stored page cursor let the run skip instead of re-fetching. */
+    rowsSkipped: bigint("rows_skipped", {mode: "number"}),
     rangeSince: date("range_since"),
     rangeUntil: date("range_until"),
     error: text("error"),

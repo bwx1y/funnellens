@@ -1,4 +1,4 @@
-import {bigint, bigserial, integer, pgTable, text, timestamp, uniqueIndex} from "drizzle-orm/pg-core";
+import {bigint, bigserial, index, integer, pgTable, text, timestamp, uniqueIndex, uuid} from "drizzle-orm/pg-core";
 import {relations} from "drizzle-orm";
 import {LeadEntity} from "@db/schema/wa/lead.entity";
 import {AdEntity} from "@db/schema/ads/ad.entity";
@@ -14,7 +14,11 @@ export const ConversationMessageEntity = pgTable("conversation_messages", {
     contextWamid: text("context_wamid"),
     direction: messageDirectionEnum("direction").notNull(),
     senderRole: text("sender_role"),
+    /** Plaintext is gone after the encryption backfill; only `bodyEncrypted` is written from then on. */
     body: text("body"),
+    bodyEncrypted: text("body_encrypted"),
+    /** Cloud API conversation id when the payload carries one, else a stable 24-hour bucket per lead. */
+    conversationId: uuid("conversation_id"),
     sentAt: timestamp("sent_at", {withTimezone: true}).notNull(),
     /** Waktu kirim pesan CS yang dipasangkan; `responseSeconds = sentAt - repliedAt`. */
     repliedAt: timestamp("replied_at", {withTimezone: true}),
@@ -27,6 +31,7 @@ export const ConversationMessageEntity = pgTable("conversation_messages", {
     creativeId: text("creative_id").references(() => AdCreativeEntity.id),
 }, (t) => ({
     uqLeadWamid: uniqueIndex("uq_conversation_messages_lead_wamid").on(t.leadId, t.wamid),
+    idxLeadConversation: index("idx_conversation_messages_lead_conversation").on(t.leadId, t.conversationId, t.sentAt),
 }));
 
 export const ConversationMessageRelationship = relations(ConversationMessageEntity, ({one}) => ({

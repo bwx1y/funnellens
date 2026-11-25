@@ -10,6 +10,7 @@ import {SyncRunRepository} from "@db/repositories/sync-run.repository";
 import type {UpsertInsightDailyParams} from "@db/repositories/ad-insight-daily.repository";
 import type {InsertAdInsightBreakdownDaily} from "@db/repositories/ad-insight-breakdown.repository";
 import {InsightStagingRepository} from "@db/repositories/insight-staging.repository";
+import {SyncCursorRepository} from "@db/repositories/sync-cursor.repository";
 import {BadRequestError, InternalError, NotFoundError, UnauthorizedError} from "@shared/errors";
 import {JwtUtil} from "@shared/jwt";
 import {logger} from "@shared/logger";
@@ -152,6 +153,26 @@ interface GraphAd {
     updated_time?: string;
 }
 
+/** Where a resumable walk keeps its position, and who wants to hear how many pages it skipped. */
+export interface SyncCursorScope {
+    accountId: string;
+    resource: string;
+    onSkipped?: (pages: number) => void;
+}
+
+/** The stored cursor is JSON so the page count survives a resume; an older plain URL still parses. */
+function parseCursor(raw: string): {next: string; pages: number} | null {
+    if (!raw.startsWith("{")) return {next: raw, pages: 1};
+
+    try {
+        const parsed = JSON.parse(raw) as {next?: unknown; pages?: unknown};
+        if (typeof parsed.next !== "string") return null;
+        return {next: parsed.next, pages: typeof parsed.pages === "number" ? parsed.pages : 1};
+    } catch {
+        return null;
+    }
+}
+
 export type MetaRequester = <T>(
     path: string,
     params: Record<string, string | undefined>,
@@ -170,6 +191,7 @@ export class MetaService {
         private readonly customRequest?: MetaRequester,
         private readonly metaAdapter: IMetaAdsAdapter = new FacebookSdkAdapter(),
         private readonly insightStagingRepository = new InsightStagingRepository(),
+        private readonly syncCursorRepository = new SyncCursorRepository(),
     ) {}
 
     async authorizationUrl(user: { iss: string; tenantId: string }): Promise<{ url: string; expiresIn: number }> {
@@ -264,8 +286,10 @@ export class MetaService {
             throw new NotFoundError("Meta connection not found");
         }
 
+        // Revoking at Meta makes the stored token useless even if the row outlives this call; a failed
+        // revoke is a warning, not a reason to keep a connection the user asked to remove.
         try {
-            await this.request("/me/permissions", {access_token: entity.accessToken}, {method: "DELETE"});
+            await this.request(`/${entity.metaUserId}/permissions`, {access_token: entity.accessToken}, {method: "DELETE"});
         } catch (error) {
             logger.warn({error, userId}, "Failed to revoke Meta token");
         }
@@ -373,18 +397,42 @@ export class MetaService {
         return await this.adAccountRepository.findSelectedByTenantId(user.tenantId);
     }
 
+    /**
+     * Walks every page of a Graph edge. With a `cursor` scope the walk is resumable: the position after
+     * each page is persisted, a job killed mid-walk restarts at that page instead of page one, and the
+     * cursor is deleted once the walk reaches its end. The cursor also remembers how many pages it has
+     * already covered, which is what a resumed run reports as skipped.
+     */
     async fetchAll<T>(
         path: string,
         params: Record<string, string | undefined>,
-        accessToken: string
+        accessToken: string,
+        cursor?: SyncCursorScope
     ): Promise<T[]> {
         const rows: T[] = [];
+        let pagesWalked = 0;
         let currentPath: string | null = path;
         let currentParams: Record<string, string | undefined> | null = {
             ...params,
             access_token: accessToken,
             limit: params.limit ?? "500",
         };
+
+        if (cursor !== undefined) {
+            const saved = await this.syncCursorRepository.find(cursor.accountId, cursor.resource);
+            const resumed = saved === null ? null : parseCursor(saved.cursor);
+            if (resumed !== null) {
+                const nextUrl = new URL(resumed.next);
+                currentPath = nextUrl.pathname.replace(/^\/v\d+\.\d+/, "");
+                const nextParams: Record<string, string> = {};
+                nextUrl.searchParams.forEach((value: string, key: string) => {
+                    nextParams[key] = value;
+                });
+                currentParams = nextParams;
+                pagesWalked = resumed.pages;
+                cursor.onSkipped?.(resumed.pages);
+            }
+        }
 
         while (currentPath) {
             const res: GraphPagedResponse<T> = await this.request<GraphPagedResponse<T>>(
@@ -396,6 +444,8 @@ export class MetaService {
                 rows.push(...res.data);
             }
 
+            pagesWalked += 1;
+
             if (res.paging?.next) {
                 const nextUrl: URL = new URL(res.paging.next);
                 // Strip Graph API version prefix e.g. /v21.0
@@ -405,10 +455,22 @@ export class MetaService {
                     nextParams[key] = value;
                 });
                 currentParams = nextParams;
+
+                if (cursor !== undefined) {
+                    await this.syncCursorRepository.save(
+                        cursor.accountId,
+                        cursor.resource,
+                        JSON.stringify({next: res.paging.next, pages: pagesWalked})
+                    );
+                }
             } else {
                 currentPath = null;
                 currentParams = null;
             }
+        }
+
+        if (cursor !== undefined) {
+            await this.syncCursorRepository.clear(cursor.accountId, cursor.resource);
         }
 
         return rows;
@@ -463,6 +525,15 @@ export class MetaService {
             let adSetsData;
             let creativesData;
             let adsData;
+            // Pages an interrupted earlier run already walked; reported on the sync run.
+            let skippedPages = 0;
+            const cursorOf = (resource: string): SyncCursorScope => ({
+                accountId: normalizedAccountId,
+                resource,
+                onSkipped: (pages) => {
+                    skippedPages += pages;
+                },
+            });
 
             if (this.customRequest) {
                 // Fallback / legacy customRequest path for custom mock tests
@@ -471,7 +542,8 @@ export class MetaService {
                     {
                         fields: "id,name,objective,status,effective_status,buying_type,daily_budget,lifetime_budget,budget_remaining,start_time,stop_time,created_time,updated_time",
                     },
-                    connection.accessToken
+                    connection.accessToken,
+                    cursorOf("master-campaigns")
                 );
                 campaignsData = rawCampaigns.map((c) => ({
                     id: c.id,
@@ -495,7 +567,8 @@ export class MetaService {
                     {
                         fields: "id,name,campaign_id,status,effective_status,optimization_goal,destination_type,billing_event,bid_strategy,bid_amount,daily_budget,lifetime_budget,targeting,start_time,end_time,created_time,updated_time",
                     },
-                    connection.accessToken
+                    connection.accessToken,
+                    cursorOf("master-adsets")
                 );
                 adSetsData = rawAdSets.map((s) => ({
                     id: s.id,
@@ -523,7 +596,8 @@ export class MetaService {
                     {
                         fields: "id,name,object_type,status,video_id,image_url,thumbnail_url,object_story_id,body,title,call_to_action_type,url_tags,created_time,updated_time",
                     },
-                    connection.accessToken
+                    connection.accessToken,
+                    cursorOf("master-creatives")
                 );
 
                 const videoDetailsMap = new Map<string, GraphVideo>();
@@ -571,7 +645,8 @@ export class MetaService {
                     {
                         fields: "id,name,campaign_id,adset_id,status,effective_status,creative,created_time,updated_time",
                     },
-                    connection.accessToken
+                    connection.accessToken,
+                    cursorOf("master-ads")
                 );
                 adsData = rawAds.map((ad) => ({
                     id: ad.id,
@@ -701,7 +776,7 @@ export class MetaService {
             await this.adRepository.upsertBatch(ads);
 
             const totalRows = campaigns.length + adSets.length + creatives.length + ads.length;
-            await this.syncRunRepository.complete(syncRun.id, totalRows);
+            await this.syncRunRepository.complete(syncRun.id, totalRows, skippedPages);
 
             logger.info({accountId: normalizedAccountId, totalRows}, "Meta master metadata sync completed");
 

@@ -21,6 +21,8 @@ describe("Custom Period Non-Additive Metrics", () => {
             metaUserId: "meta-123",
             metaUserName: "Meta User",
             accessToken: "valid-token",
+            refreshToken: null,
+            tokenRefreshedAt: null,
             scopes: ["ads_read"],
             expiresAt: new Date(Date.now() + 100000),
             createdAt: new Date(),
@@ -37,6 +39,8 @@ describe("Custom Period Non-Additive Metrics", () => {
             accountStatus: 1,
             businessId: null,
             isSelected: true,
+            lastSyncAt: null,
+            lastSyncError: null,
             createdAt: new Date(),
             updatedAt: new Date(),
         };
@@ -48,6 +52,7 @@ describe("Custom Period Non-Additive Metrics", () => {
         const mockAdAccountRepo = {
             findById: mock(async (): Promise<AdAccountSelect | null> => activeAccount),
             findSelectedByTenantId: mock(async (): Promise<AdAccountSelect | null> => activeAccount),
+            recordSyncOutcome: mock(async (): Promise<void> => {}),
         } as unknown as AdAccountRepository;
 
         const mockAdapter: IMetaAdsAdapter = {
@@ -124,6 +129,7 @@ describe("MetaSyncWorkerProcessor", () => {
                 id: "act_worker_test",
                 tenantId: "tenant-1",
             })),
+            recordSyncOutcome: mock(async (): Promise<void> => {}),
         } as unknown as AdAccountRepository;
 
         const processor = new MetaSyncWorkerProcessor(
@@ -172,6 +178,7 @@ describe("MetaSyncWorkerProcessor", () => {
                 id: `act_${tenantId}`,
                 tenantId,
             })),
+            recordSyncOutcome: mock(async (): Promise<void> => {}),
         } as unknown as AdAccountRepository;
 
         const processor = new MetaSyncWorkerProcessor(

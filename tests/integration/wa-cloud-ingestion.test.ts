@@ -4,6 +4,7 @@ import {app} from "@/index";
 import {Config} from "@/config";
 import {db} from "@db/index";
 import {DatabaseRepository} from "@db/repositories/base.repository";
+import {ConversationMessageRepository} from "@db/repositories/conversation-message.repository";
 import {WaPhoneRepository} from "@db/repositories/wa-phone.repository";
 import {QueueManager} from "@infra/queue";
 import {JwtUtil} from "@shared/jwt";
@@ -476,15 +477,25 @@ describe("WhatsApp Cloud API ingestion", () => {
         expect(binding?.phone).toBe("+628999000111");
 
         const [inbound] = await db.execute(sql`
-            select m.direction, m.sender_role, m.body, m.wamid
+            select m.id, m.direction, m.sender_role, m.body, m.body_encrypted, m.wamid
             from conversation_messages m
             join leads l on l.id = m.lead_id
             where l.account_id = ${accountId} and l.external_id = ${phoneHash(`+${customer}`)}
-        `) as unknown as {direction: string; sender_role: string; body: string; wamid: string}[];
+        `) as unknown as {
+            id: number;
+            direction: string;
+            sender_role: string;
+            body: string | null;
+            body_encrypted: string | null;
+            wamid: string;
+        }[];
 
         expect(inbound.direction).toBe("INBOUND");
         expect(inbound.sender_role).toBe("LEAD");
-        expect(inbound.body).toBe("halo dari openwa");
+        // The column holds ciphertext; readers decrypt, so the trail still shows the text.
+        expect(inbound.body).toBeNull();
+        expect(inbound.body_encrypted).toStartWith("v1:");
+        expect((await new ConversationMessageRepository().findById(inbound.id))?.body).toBe("halo dari openwa");
         expect(inbound.wamid).toBe(base.id);
 
         await service.ingestOpenWa({

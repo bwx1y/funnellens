@@ -127,6 +127,12 @@ export interface SegmentsResponse {
     note?: string;
 }
 
+/** How the lead was tied to an ad: the method and how much it is trusted. */
+export interface LeadAttribution {
+    method: string | null;
+    confidence: string | null;
+}
+
 export interface PipelineRow {
     leadId: number;
     name: string | null;
@@ -141,6 +147,7 @@ export interface PipelineRow {
     firstSeenAt: string | null;
     firstRepliedAt: string | null;
     milestoneAt: {warm: string | null; hot: string | null};
+    attribution: LeadAttribution;
     explanation: ExplanationRef | null;
 }
 
@@ -199,6 +206,7 @@ export interface LeadListRow {
     confidence: string | null;
     waitingMinutes: number | null;
     createdAt: string;
+    attribution: LeadAttribution;
 }
 
 export interface LeadListResponse {
@@ -645,6 +653,7 @@ export class AudienceService {
                 warm: row.warmAt?.toISOString() ?? null,
                 hot: row.hotAt?.toISOString() ?? null,
             },
+            attribution: {method: row.attributionMethod, confidence: row.attributionConfidence},
             explanation: explanationRefs[index],
         }));
 
@@ -843,6 +852,7 @@ export class AudienceService {
                     ? Math.max(0, Math.floor((now - lead.firstSeenAt.getTime()) / 60_000))
                     : null,
                 createdAt: lead.createdAt.toISOString(),
+                attribution: {method: lead.attributionMethod, confidence: lead.attributionConfidence},
             })),
             page: page.page,
             pageSize,
@@ -855,6 +865,24 @@ export class AudienceService {
                 total: distribution.cold + distribution.warm + distribution.hot,
             },
         };
+    }
+
+    /**
+     * Erases one lead and everything attached to it, then writes the receipt. The lead must belong to
+     * the caller's tenant: another workspace's lead is "not found", never "forbidden".
+     */
+    async deleteLead(
+        tenantId: string,
+        leadId: number,
+        actor: {userId: string; reason?: string}
+    ): Promise<{deleted: true; leadId: number}> {
+        const deleted = await this.leadRepo.deleteForTenant(tenantId, leadId, {
+            userId: actor.userId,
+            reason: actor.reason ?? null,
+        });
+        if (!deleted) throw new NotFoundError("Lead tidak ditemukan");
+
+        return {deleted: true, leadId};
     }
 
     /**
