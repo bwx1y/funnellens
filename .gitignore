@@ -50,3 +50,4 @@ pnpm-lock.yaml
 
 # tool artifacts
 graphify-out/
+.omp
