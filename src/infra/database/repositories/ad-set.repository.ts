@@ -1,6 +1,6 @@
 import {DatabaseRepository} from "./base.repository";
 import {AdSetEntity} from "@db/schema/ads/ad-set.entity";
-import {eq, sql} from "drizzle-orm";
+import {and, eq, inArray, sql} from "drizzle-orm";
 
 export class AdSetRepository extends DatabaseRepository {
     async upsertBatch(adSets: (typeof AdSetEntity.$inferInsert)[]): Promise<void> {
@@ -39,5 +39,23 @@ export class AdSetRepository extends DatabaseRepository {
             .from(AdSetEntity)
             .where(eq(AdSetEntity.campaignId, campaignId))
             .orderBy(AdSetEntity.name);
+    }
+
+    /**
+     * Whether any ad set of these accounts targets the given channel. This is the scope gate for the
+     * WhatsApp source: a tenant whose ad sets are all `web` has no WhatsApp funnel to report on.
+     */
+    async hasObjectiveGroup(accountIds: string[], objectiveGroup: "wa" | "web"): Promise<boolean> {
+        if (accountIds.length === 0) return false;
+
+        const [entity] = await this.database.select({id: AdSetEntity.id})
+            .from(AdSetEntity)
+            .where(and(
+                inArray(AdSetEntity.accountId, accountIds),
+                eq(AdSetEntity.objectiveGroup, objectiveGroup)
+            ))
+            .limit(1);
+
+        return entity !== undefined;
     }
 }

@@ -17,6 +17,8 @@ import {isPartialDay, periodLabel, resolvePeriod} from "@shared/period";
 import {ExplanationService, type ExplanationRef} from "@/modules/explanations/service";
 import {formatDuration, formatNumber, formatPercent} from "@/modules/explanations/rules";
 import {
+    DEFAULT_PAGE_SIZE,
+    LEAD_PAGE_SIZES,
     REPLY_TYPES,
     RESPONSE_BUCKETS,
     buildSankey,
@@ -270,11 +272,7 @@ export interface LeadUpdateResponse {
 }
 
 const DEFAULT_PAGE = 1;
-const DEFAULT_PAGE_SIZE = 10;
 const TRAIL_LIMIT = 50;
-
-/** The only page sizes the lead list accepts; anything else is a client error, not a clamp. */
-export const LEAD_PAGE_SIZES = [5, 10, 15] as const;
 
 /** Maps the legacy `limit` alias and rejects every size outside {@link LEAD_PAGE_SIZES}. */
 export function resolveLeadPageSize(value: string | undefined): number {

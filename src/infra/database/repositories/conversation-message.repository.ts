@@ -1,5 +1,6 @@
 import {DatabaseRepository} from "./base.repository";
 import {ConversationMessageEntity} from "@db/schema/wa/conversation-message.entity";
+import {LeadEntity} from "@db/schema/wa/lead.entity";
 import type {ReplyType, Sentiment} from "@shared/audience";
 import {and, desc, eq, gte, inArray, isNotNull, lte, sql} from "drizzle-orm";
 
@@ -228,6 +229,18 @@ export class ConversationMessageRepository extends DatabaseRepository {
             measuredLeads: Number(row.measured_leads),
             observedLeads: Number(row.observed_leads),
         };
+    }
+
+    /** Newest message among these accounts' leads: the stored evidence that WhatsApp ingestion ran. */
+    async getLatestSentAt(accountIds: string[]): Promise<Date | null> {
+        if (accountIds.length === 0) return null;
+
+        const [row] = await this.database.select({sentAt: sql<string | Date | null>`max(${ConversationMessageEntity.sentAt})`})
+            .from(ConversationMessageEntity)
+            .innerJoin(LeadEntity, eq(LeadEntity.id, ConversationMessageEntity.leadId))
+            .where(inArray(LeadEntity.accountId, accountIds));
+
+        return row.sentAt === null ? null : new Date(row.sentAt);
     }
 
     /** First measured response per lead, with its current temperature (for the cohort heatmap). */

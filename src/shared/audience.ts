@@ -22,6 +22,10 @@ export const HEATMAP_MIN_LEADS_PER_BUCKET = 10;
 export const TEMPERATURE_LEVELS = ["COLD", "WARM", "HOT"] as const;
 export type TemperatureLevel = typeof TEMPERATURE_LEVELS[number];
 
+/** The only page sizes the lead list accepts; anything else is a client error, not a clamp. */
+export const LEAD_PAGE_SIZES = [5, 10, 15] as const;
+export const DEFAULT_PAGE_SIZE = 10;
+
 export interface SankeyLink {
     from: TemperatureLevel;
     to: TemperatureLevel;

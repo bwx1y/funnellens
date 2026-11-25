@@ -6,8 +6,8 @@ Tidak ada endpoint settings. Data workspace tersebar di `/profile`, `/meta/conne
 ## Daftar Pekerjaan
 
 ### 1. Endpoint
-- [ ] Buat `src/modules/settings/{index.ts,service.ts}` dan daftarkan `SettingsController` di `src/routes.ts` dengan prefix `/settings`, `JwtUtil.isAuthenticated`.
-- [ ] `GET /api/settings` (tanpa query) mengembalikan:
+- [x] Buat `src/modules/settings/{index.ts,service.ts}` dan daftarkan `SettingsController` di `src/routes.ts` dengan prefix `/settings`, `JwtUtil.isAuthenticated`.
+- [x] `GET /api/settings` (tanpa query) mengembalikan:
   ```ts
   {
     workspace: {id, name, address, timezone, currency, currencyOffset},
@@ -24,17 +24,17 @@ Tidak ada endpoint settings. Data workspace tersebar di `/profile`, `/meta/conne
     exportAuditEnabled: boolean
   }
   ```
-- [ ] `workspace` dari tenant user (`user.tenantId`) + akun terpilih (`adAccountRepository.findSelectedByTenantId`); `timezone`/`currency`/`currencyOffset` dari akun, `null` bila belum ada akun.
-- [ ] `mode.readOnly` selalu `true` — backend ini memang analytics-only (lihat §0 checklist). `reason` menjelaskan kenapa.
-- [ ] `sources` dirakit `SettingsService` dari tiga repository yang sudah ada:
+- [x] `workspace` dari tenant user (`user.tenantId`) + akun terpilih (`adAccountRepository.findSelectedByTenantId`); `timezone`/`currency`/`currencyOffset` dari akun, `null` bila belum ada akun.
+- [x] `mode.readOnly` selalu `true` — backend ini memang analytics-only (lihat §0 checklist). `reason` menjelaskan kenapa.
+- [x] `sources` dirakit `SettingsService` dari tiga repository yang sudah ada:
   - `meta` → `MetaConnectionRepository.findByTenantId`; `status = "expired"` bila `expiresAt <= now`, `"disconnected"` bila tidak ada koneksi.
   - `whatsapp` → `WaSessionRepository.findAllByTenantId`; `status = "connected"` bila ada sesi berstatus `ready`, `"disconnected"` bila tidak ada, `"out_of_scope"` bila tenant hanya punya akun `web`.
   - `lastSyncAt` dari `SyncRunRepository` (baris `finished_at` terbaru berstatus sukses), `lastError` dari baris `error` terbaru.
-- [ ] `limits` memakai konstanta yang sudah ada: `MIN_COMPARATORS`/`maxComparisonCreatives = 5` (`src/shared/creative.ts`), `MAX_SEARCH_RESULTS = 8` (modul search), `DEFAULT_PAGE_SIZE = 10`, `PERIOD_DAYS` (`src/shared/period.ts`).
-- [ ] `exportAuditEnabled` = `true` setelah task `21-report-export.md` selesai; sebelum itu `false`.
+- [x] `limits` memakai konstanta yang sudah ada: `MIN_COMPARATORS`/`maxComparisonCreatives = 5` (`src/shared/creative.ts`), `MAX_SEARCH_RESULTS = 8` (modul search), `DEFAULT_PAGE_SIZE = 10`, `PERIOD_DAYS` (`src/shared/period.ts`).
+- [x] `exportAuditEnabled` = `true` setelah task `21-report-export.md` selesai; sebelum itu `false`.
 
 ### 2. Schema
-- [ ] Buat `src/modules/settings/schema.ts` dengan `SettingsSchema = {}` (tanpa query) agar konsisten dengan modul lain yang memakai `UnwrapSchema`.
+- [x] Buat `src/modules/settings/schema.ts` berisi kontrak respons (`SettingsResponse`, `SettingsSource`, `SettingsSourceStatus`) tanpa query — objek `SettingsSchema = {}` tidak diekspor karena tidak ada pemanggil yang memakainya.
 
 ## File yang Disentuh
 - `src/modules/settings/{index,service,schema}.ts` (baru)

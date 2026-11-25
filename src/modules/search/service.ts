@@ -27,7 +27,8 @@ export interface SearchQuery {
     accountId?: string;
 }
 
-const RESULT_LIMIT = 8;
+/** Cap per result set, shared with `GET /api/settings` so the documented limit cannot drift. */
+export const MAX_SEARCH_RESULTS = 8;
 const MIN_QUERY_LENGTH = 2;
 
 /** Static route registry: the app has a fixed set of pages, so no database lookup is needed. */
@@ -114,14 +115,14 @@ export class SearchService {
 
         if (q.length < MIN_QUERY_LENGTH) {
             return {
-                pages: PAGES.slice(0, RESULT_LIMIT),
+                pages: PAGES.slice(0, MAX_SEARCH_RESULTS),
                 leads: [],
                 meta: {q, truncated: false},
             };
         }
 
         const needle = q.toLowerCase();
-        const pages = rankPages(needle).slice(0, RESULT_LIMIT);
+        const pages = rankPages(needle).slice(0, MAX_SEARCH_RESULTS);
         const leads = query.accountId === undefined
             ? []
             : await this.searchLeads(tenantId, query.accountId, q);
@@ -129,7 +130,7 @@ export class SearchService {
         return {
             pages,
             leads,
-            meta: {q, truncated: pages.length >= RESULT_LIMIT || leads.length >= RESULT_LIMIT},
+            meta: {q, truncated: pages.length >= MAX_SEARCH_RESULTS || leads.length >= MAX_SEARCH_RESULTS},
         };
     }
 
@@ -139,7 +140,7 @@ export class SearchService {
         const {leads} = await this.leadRepo.getLeadList(accountId, {
             search: q,
             page: 1,
-            pageSize: RESULT_LIMIT,
+            pageSize: MAX_SEARCH_RESULTS,
             sortBy: "createdAt",
             sortDir: "desc",
         });

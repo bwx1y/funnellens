@@ -15,6 +15,7 @@ import {AlertsController} from "@/modules/alerts";
 import {ExplanationController} from "@/modules/explanations";
 import {SearchController} from "@/modules/search";
 import {ReportsController} from "@/modules/reports";
+import {SettingsController} from "@/modules/settings";
 
 export const routes = new Elysia({
     prefix: "/api"
@@ -36,4 +37,5 @@ export const routes = new Elysia({
     .use(AlertsController)
     .use(ExplanationController)
     .use(SearchController)
-    .use(ReportsController);
+    .use(ReportsController)
+    .use(SettingsController);

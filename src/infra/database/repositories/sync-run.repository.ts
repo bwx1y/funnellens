@@ -1,6 +1,11 @@
 import {DatabaseRepository} from "./base.repository";
 import {SyncRunEntity} from "@db/schema/ads/sync-run.entity";
-import {and, desc, eq} from "drizzle-orm";
+import {and, desc, eq, isNotNull} from "drizzle-orm";
+
+export interface SyncRunFailure {
+    error: string | null;
+    finishedAt: Date | null;
+}
 
 export class SyncRunRepository extends DatabaseRepository {
     async create(run: typeof SyncRunEntity.$inferInsert): Promise<typeof SyncRunEntity.$inferSelect> {
@@ -38,6 +43,44 @@ export class SyncRunRepository extends DatabaseRepository {
             .limit(1);
 
         return entity ?? null;
+    }
+
+    /** `finished_at` of the newest successful run: the stored proof that a sync completed. */
+    async findLatestSuccessAt(accountId: string): Promise<Date | null> {
+        const [entity] = await this.database.select({finishedAt: SyncRunEntity.finishedAt})
+            .from(SyncRunEntity)
+            .where(and(
+                eq(SyncRunEntity.accountId, accountId),
+                eq(SyncRunEntity.status, "SUCCESS"),
+                isNotNull(SyncRunEntity.finishedAt)
+            ))
+            .orderBy(desc(SyncRunEntity.finishedAt))
+            .limit(1);
+
+        return entity?.finishedAt ?? null;
+    }
+
+    /**
+     * Newest failed run, with its finish time: the caller needs the timestamp to tell a current error
+     * from one a later successful run already cleared.
+     */
+    async findLatestFailure(accountId: string): Promise<SyncRunFailure | null> {
+        const [entity] = await this.database.select({
+            error: SyncRunEntity.error,
+            finishedAt: SyncRunEntity.finishedAt,
+        })
+            .from(SyncRunEntity)
+            .where(and(
+                eq(SyncRunEntity.accountId, accountId),
+                eq(SyncRunEntity.status, "FAILED"),
+                isNotNull(SyncRunEntity.error)
+            ))
+            .orderBy(desc(SyncRunEntity.finishedAt), desc(SyncRunEntity.id))
+            .limit(1);
+
+        if (entity === undefined) return null;
+
+        return {error: entity.error, finishedAt: entity.finishedAt};
     }
 
     async getLatestByAccountId(accountId: string, resource?: string): Promise<typeof SyncRunEntity.$inferSelect | null> {
