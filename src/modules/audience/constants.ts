@@ -7,7 +7,7 @@ import {
 } from "@shared/audience";
 
 /** Bumped whenever the rubric or the two-level prompt changes: part of the assessment dedupe key. */
-export const ASSESS_PROMPT_VERSION = "a2-v1";
+export const ASSESS_PROMPT_VERSION = "a2-v2";
 
 /** Marker rows that record an unavailable assessment; a later successful run may still insert. */
 export const UNAVAILABLE_RULE_VERSION = `${ASSESS_PROMPT_VERSION}-unavailable`;
@@ -48,6 +48,10 @@ export const DECISION_SCHEMA = t.Object({
     evidenceWamid: t.String(),
     responseType: enumOf(REPLY_TYPES),
     sentiment: enumOf(SENTIMENTS),
+    /** Short phrase for what the conversation was about; empty string when there is none. */
+    topic: t.Optional(t.String()),
+    /** Verbatim short quote from a LEAD message; empty string when there is none. */
+    quote: t.Optional(t.String()),
 });
 
 export type Signals = UnwrapSchema<typeof SIGNAL_SCHEMA>;
@@ -102,6 +106,8 @@ Satu entri untuk setiap pesan dengan sender "LEAD" pada input; jangan mengarang 
 Gunakan string kosong bila informasi tidak disebut.`;
 
 export const DECISION_INSTRUCTION = `TUGAS TINGKAT 2: tentukan level lead dari sinyal dan percakapan.
-Balas JSON {level, confidence, reason, evidenceWamid, responseType, sentiment}.
+Balas JSON {level, confidence, reason, evidenceWamid, responseType, sentiment, topic, quote}.
 evidenceWamid wajib salah satu wamid pada input; responseType hanya untuk pesan lead terakhir.
-Jangan memakai skor angka.`;
+topic: frasa pendek tentang hal yang dibahas percakapan; string kosong bila tidak ada.
+quote: kutipan pendek persis (verbatim) dari salah satu pesan "LEAD"; string kosong bila tidak ada.
+Jangan mengarang topic atau quote; jangan memakai skor angka.`;

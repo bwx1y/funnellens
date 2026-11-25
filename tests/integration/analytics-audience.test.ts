@@ -614,6 +614,7 @@ describe("Audience intelligence", () => {
                 state: "PENDING",
                 source: null,
                 text: null,
+                simulated: expect.any(Boolean),
                 evidenceIds: ["w2"],
                 snapshotId: `${SINCE}..${UNTIL}`,
             },

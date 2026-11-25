@@ -4,6 +4,12 @@ import {eq, sql} from "drizzle-orm";
 
 export type TrackingHealthEvent = typeof TrackingHealthDailyEntity.$inferSelect;
 
+export interface TrackingHealthLatestEvent {
+    eventName: string;
+    /** Newest snapshot date of that event, `YYYY-MM-DD`. */
+    date: string;
+}
+
 export interface TrackingHealthSummary {
     /** Latest snapshot date for the account. */
     date: string | null;
@@ -62,6 +68,17 @@ export class TrackingHealthRepository extends DatabaseRepository {
                     raw: sql`excluded.raw`,
                 },
             });
+    }
+
+    /** Newest snapshot date per distinct event of the account: the input of the freshness list. */
+    async getLatestPerEvent(accountId: string): Promise<TrackingHealthLatestEvent[]> {
+        return this.database.select({
+            eventName: TrackingHealthDailyEntity.eventName,
+            date: sql<string>`max(${TrackingHealthDailyEntity.date})`,
+        })
+            .from(TrackingHealthDailyEntity)
+            .where(eq(TrackingHealthDailyEntity.accountId, accountId))
+            .groupBy(TrackingHealthDailyEntity.eventName);
     }
 
     async getLatestStatus(accountId: string): Promise<TrackingHealthSummary> {

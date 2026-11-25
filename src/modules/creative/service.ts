@@ -23,6 +23,7 @@ import {formatNumber, formatPercent} from "@/modules/explanations/rules";
 import {
     MIN_COMPARATORS,
     PATTERN_MIN_CREATIVES,
+    PATTERN_MIN_PER_SIDE,
     PATTERN_Q,
     aggregateWindow,
     attentionDimension,
@@ -34,6 +35,7 @@ import {
     experimentState,
     fatigue,
     healthDimension,
+    medianGapSign,
     overallStatus,
     qualityDimension,
     trailingCtrDeclineDays,
@@ -60,6 +62,7 @@ const IMPRESSION_DENOMINATOR = 3000;
 const LEAD_DENOMINATOR = 10;
 const BASELINE_DAYS = 7;
 const RECENT_DAYS = 3;
+const TREND_POINTS = 30;
 
 const EMPTY_NOTE = "Belum ada kreatif dengan data iklan pada periode ini.";
 const INCOMPLETE_NOTE = "Rentang pengamatan belum lengkap sehingga kejenuhan belum bisa dinilai.";
@@ -172,10 +175,36 @@ export interface CreativeRow {
     note?: string;
 }
 
+export interface CreativeKpi {
+    spendMinor: number;
+    impressions: number;
+    count: number;
+    assessed: number;
+    conversations: number | null;
+    purchases: number | null;
+    hotShare: number | null;
+}
+
+export interface CreativeCampaignSummary {
+    campaignId: string;
+    name: string | null;
+    spendShare: number | null;
+    messageCompleteness: number | null;
+}
+
+export interface CreativeTrendPoint {
+    date: string;
+    spendMinor: number;
+    results: number;
+}
+
 export interface CreativeListResponse {
     period: {since: string; until: string; days: number; label: string; isPartial: boolean};
     sortBy: CreativeSortKey;
     creatives: CreativeRow[];
+    kpi: CreativeKpi;
+    campaignSummary: CreativeCampaignSummary[];
+    trend: CreativeTrendPoint[];
     sample: SampleBlock;
     note?: string;
     explanation: ExplanationRef | null;
@@ -261,6 +290,11 @@ export interface PatternRow {
     withoutCount: number;
     withMedianCostPerResultMinor: number | null;
     withoutMedianCostPerResultMinor: number | null;
+    medianYesMinor: number | null;
+    medianNoMinor: number | null;
+    supported: boolean;
+    consistent: boolean;
+    clear: boolean;
     pValue: number | null;
     adjustedPValue: number | null;
     significant: boolean;
@@ -411,7 +445,11 @@ export class CreativeService {
     async listCreatives(tenantId: string, query: CreativeListQuery): Promise<CreativeListResponse> {
         const account = await requireAccountScope(tenantId, query.accountId);
         const period = resolvePeriod(account, query);
-        const cohort = await this.loadCohort(query.accountId, period);
+        const [cohort, objectiveGroups, campaignSpend] = await Promise.all([
+            this.loadCohort(query.accountId, period),
+            this.analyticsRepo.getObjectiveGroups(query.accountId, query.campaignId),
+            this.analyticsRepo.getCreativeCampaignSpend(query.accountId, period.start, period.end, query.campaignId),
+        ]);
 
         const aggregates = query.campaignId === undefined
             ? cohort.aggregates
@@ -427,10 +465,79 @@ export class CreativeService {
             .map((aggregate) => this.toCreativeRow(aggregate, cohort, period))
             .sort((left, right) => compareCreativeRows(left, right, sortBy));
 
+        // A channel the account never ran has no KPI: `null`, never a fabricated zero.
+        const [waCounts, webCounts] = await Promise.all([
+            objectiveGroups.includes("wa")
+                ? this.analyticsRepo.getFunnelCounts(query.accountId, period.start, period.end, query.campaignId, "wa")
+                : null,
+            objectiveGroups.includes("web")
+                ? this.analyticsRepo.getFunnelCounts(query.accountId, period.start, period.end, query.campaignId, "web")
+                : null,
+        ]);
+
+        const creativeIds = new Set(aggregates.map((aggregate) => aggregate.creativeId));
+        let hotLeads = 0;
+        let assessedMatureLeads = 0;
+        for (const creativeId of creativeIds) {
+            const quality = cohort.qualityByCreative.get(creativeId);
+            hotLeads += quality?.hotLeads ?? 0;
+            assessedMatureLeads += quality?.assessedMatureLeads ?? 0;
+        }
+
+        const kpi: CreativeKpi = {
+            spendMinor: aggregates.reduce((sum, aggregate) => sum + aggregate.spendMinor, 0),
+            impressions: aggregates.reduce((sum, aggregate) => sum + aggregate.impressions, 0),
+            count: creatives.length,
+            assessed: creatives.filter((row) => row.dimensions.cost.certainty !== "kurang").length,
+            conversations: waCounts === null ? null : waCounts.messagingStarted,
+            purchases: webCounts === null ? null : webCounts.purchase,
+            hotShare: assessedMatureLeads === 0 ? null : round4(hotLeads / assessedMatureLeads),
+        };
+
+        const campaignTotals = new Map<string, {name: string | null; spendMinor: number; creativeIds: Set<string>}>();
+        for (const row of campaignSpend) {
+            const entry = campaignTotals.get(row.campaignId)
+                ?? {name: row.campaignName, spendMinor: 0, creativeIds: new Set<string>()};
+            entry.name = entry.name ?? row.campaignName;
+            entry.spendMinor += row.spendMinor;
+            entry.creativeIds.add(row.creativeId);
+            campaignTotals.set(row.campaignId, entry);
+        }
+        const totalCampaignSpend = campaignSpend.reduce((sum, row) => sum + row.spendMinor, 0);
+        const campaignSummary: CreativeCampaignSummary[] = [...campaignTotals.entries()]
+            .sort(([leftId, left], [rightId, right]) =>
+                right.spendMinor - left.spendMinor || compareIds(leftId, rightId))
+            .map(([campaignId, entry]) => ({
+                campaignId,
+                name: entry.name,
+                spendShare: totalCampaignSpend > 0 ? round4(entry.spendMinor / totalCampaignSpend) : null,
+                messageCompleteness: this.messageCompleteness(cohort.creativeById, entry.creativeIds),
+            }));
+
+        // The cohort series starts at the first observation, which can predate the period.
+        const trendByDate = new Map<string, {spendMinor: number; results: number}>();
+        for (const [creativeId, points] of cohort.pointsByCreative) {
+            if (!creativeIds.has(creativeId)) continue;
+            for (const point of points) {
+                if (point.date < period.since || point.date > period.until) continue;
+                const day = trendByDate.get(point.date) ?? {spendMinor: 0, results: 0};
+                day.spendMinor += point.spendMinor;
+                day.results += point.results;
+                trendByDate.set(point.date, day);
+            }
+        }
+        const trend: CreativeTrendPoint[] = [...trendByDate.entries()]
+            .sort(([left], [right]) => compareIds(left, right))
+            .slice(-TREND_POINTS)
+            .map(([date, totals]) => ({date, spendMinor: totals.spendMinor, results: totals.results}));
+
         const response: CreativeListResponse = {
             period: periodBlock(period, account.timezoneName),
             sortBy,
             creatives,
+            kpi,
+            campaignSummary,
+            trend,
             sample: creativeGate(creatives.length),
             explanation: await this.explanations.ensure({
                 tenantId,
@@ -525,6 +632,26 @@ export class CreativeService {
             cprByCreative.set(aggregate.creativeId, Math.round(aggregate.spendMinor / aggregate.results));
         }
 
+        // Consistency compares the same tag membership in both halves of the window.
+        const halfDays = Math.floor(period.days / 2);
+        const firstHalfEnd = halfDays >= 1 ? addDays(period.since, halfDays - 1) : period.since;
+        const secondHalfStart = addDays(firstHalfEnd, 1);
+        const [firstHalfAggregates, secondHalfAggregates] = await Promise.all([
+            this.analyticsRepo.getCreativeAggregates(query.accountId, period.start, endOfDayUtc(firstHalfEnd)),
+            this.analyticsRepo.getCreativeAggregates(query.accountId, startOfDayUtc(secondHalfStart), period.end),
+        ]);
+        const firstHalfCpr = halfCostPerResult(firstHalfAggregates);
+        const secondHalfCpr = halfCostPerResult(secondHalfAggregates);
+
+        const halfSign = (costPerResult: Map<string, number>, tagged: Set<string>): -1 | 1 | null => {
+            const withAttr: number[] = [];
+            const withoutAttr: number[] = [];
+            for (const [creativeId, cpr] of costPerResult) {
+                (tagged.has(creativeId) ? withAttr : withoutAttr).push(cpr);
+            }
+            return medianGapSign(withAttr, withoutAttr);
+        };
+
         const groupsByTagType = await Promise.all(
             TAG_TYPES.map((tagType) => this.analyticsRepo.getPatternGroups(
                 query.accountId,
@@ -552,6 +679,9 @@ export class CreativeService {
                 }
 
                 const pattern = costPattern(withAttr, withoutAttr);
+                const firstSign = halfSign(firstHalfCpr, tagged);
+                const secondSign = halfSign(secondHalfCpr, tagged);
+                const consistent = firstSign !== null && firstSign === secondSign;
                 attributes.push({
                     tagType,
                     tagValue: group.tagValue,
@@ -560,6 +690,11 @@ export class CreativeService {
                     withoutCount: withoutAttr.length,
                     withMedianCostPerResultMinor: pattern.withMedian,
                     withoutMedianCostPerResultMinor: pattern.withoutMedian,
+                    medianYesMinor: pattern.withMedian,
+                    medianNoMinor: pattern.withoutMedian,
+                    supported: false,
+                    consistent,
+                    clear: false,
                     pValue: pattern.pValue,
                     adjustedPValue: null,
                     significant: false,
@@ -573,7 +708,19 @@ export class CreativeService {
             const adjusted = correction.adjusted[index];
             row.adjustedPValue = adjusted === null ? null : round4(adjusted);
             row.significant = correction.significant[index];
-            if (row.significant) row.state = "eligible_for_test";
+            row.supported = row.significant
+                && row.withCount >= PATTERN_MIN_PER_SIDE
+                && row.withoutCount >= PATTERN_MIN_PER_SIDE;
+            row.clear = row.supported && row.consistent;
+
+            const insufficient = row.withCount < PATTERN_MIN_PER_SIDE
+                || row.withoutCount < PATTERN_MIN_PER_SIDE
+                || cohortIds.size < PATTERN_MIN_CREATIVES;
+            row.state = row.clear
+                ? "eligible_for_test"
+                : insufficient
+                    ? "insufficient_sample"
+                    : "no_clear_pattern";
         });
 
         const significant = attributes.filter((row) => row.significant);
@@ -1115,6 +1262,32 @@ export class CreativeService {
         return {jobId, queued: true};
     }
 
+    /**
+     * Mean of `messageEvidence.present / 7` over the campaign's creatives that have readable copy.
+     * A creative without copy contributes nothing instead of pulling the mean to zero; with no copy at
+     * all the campaign gets `null`.
+     */
+    private messageCompleteness(
+        creativeById: Map<string, CreativeEntity>,
+        creativeIds: Set<string>
+    ): number | null {
+        const values: number[] = [];
+        for (const creativeId of creativeIds) {
+            const creative = creativeById.get(creativeId);
+            const statuses = contentElementStatuses({
+                title: creative?.title ?? null,
+                body: creative?.body ?? null,
+                callToActionType: creative?.callToActionType ?? null,
+            });
+            const {evidence} = contentCompleteness(statuses);
+            if (evidence.assessed > 0) values.push(evidence.present / evidence.expected);
+        }
+
+        return values.length === 0
+            ? null
+            : round4(values.reduce((sum, value) => sum + value, 0) / values.length);
+    }
+
     /** One round trip per source table; every endpoint derives its rows from this shared cohort. */
     private async loadCohort(accountId: string, period: ResolvedPeriod): Promise<Cohort> {
         const [aggregates, quality, allocation, creatives] = await Promise.all([
@@ -1301,6 +1474,25 @@ function ratioOrNull(numerator: number, denominator: number, rounded: boolean): 
     if (denominator <= 0) return null;
     const value = numerator / denominator;
     return rounded ? Math.round(value) : round4(value);
+}
+
+/**
+ * Cost per result per creative for one half of the window. Spend and results are summed across the
+ * creative's objective groups before dividing, so a creative running both channels gets one ratio.
+ */
+function halfCostPerResult(aggregates: CreativeAggregate[]): Map<string, number> {
+    const spend = new Map<string, number>();
+    const results = new Map<string, number>();
+    for (const aggregate of aggregates) {
+        spend.set(aggregate.creativeId, (spend.get(aggregate.creativeId) ?? 0) + aggregate.spendMinor);
+        results.set(aggregate.creativeId, (results.get(aggregate.creativeId) ?? 0) + aggregate.results);
+    }
+
+    const costPerResult = new Map<string, number>();
+    for (const [creativeId, totalResults] of results) {
+        if (totalResults > 0) costPerResult.set(creativeId, (spend.get(creativeId) ?? 0) / totalResults);
+    }
+    return costPerResult;
 }
 
 function retentionRate(value: number | null, base: number | null): number | null {

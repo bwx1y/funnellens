@@ -29,3 +29,5 @@ Daftar fitur backend yang telah selesai diimplementasikan dan diuji:
 | 23 | **Operasional Produksi (cache, health probe, DLQ, rate limit, metrik, retensi)** | [`23-ops-production.md`](./23-ops-production.md) | 2026-11-25 | Selesai & Teruji ✅ |
 | 24 | **Pengerasan Ingestion (token terenkripsi, status sumber, cursor, null semantik, rekonsiliasi, CTWA/PII)** | [`24-ingestion-hardening.md`](./24-ingestion-hardening.md) | 2026-11-25 | Selesai & Teruji ✅ |
 | 25 | **Kontrak API (envelope `{data,meta}`, error `{code,message,details}`, paginasi `page_size`/`pages`, role ADMIN/VIEWER)** | [`25-api-envelope-auth.md`](./25-api-envelope-auth.md) | 2026-11-25 | Selesai & Teruji ✅ |
+| 26 | **Status Review Insight per User (`read`/`done`/`active`)** | [`26-insight-review.md`](./26-insight-review.md) | 2026-11-26 | Selesai & Teruji ✅ |
+| 27 | **Field Analitik Lengkap (KPI Channel, Tracking Warnings, Lead Analysis, Creative KPI, Pola Kreatif)** | [`27-analytics-gap-fields.md`](./27-analytics-gap-fields.md) | 2026-11-26 | Selesai & Teruji ✅ |

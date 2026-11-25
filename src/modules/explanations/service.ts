@@ -4,6 +4,7 @@ import {
     type ExplanationScope,
     type InsertExplanation,
 } from "@db/repositories/explanation.repository";
+import {MetaConnectionRepository} from "@db/repositories/meta-connection.repository";
 import {NotFoundError} from "@shared/errors";
 import {Config} from "@/config";
 import {EXPLAIN_PROMPT_VERSION, EXPLAIN_RULE_VERSION} from "@/modules/explanations/contexts";
@@ -37,10 +38,14 @@ export interface ExplanationRef {
     text: string | null;
     evidenceIds: string[];
     snapshotId: string;
+    /** True while the workspace cannot reach Meta: the narrative is a rule-based stand-in, not a model answer. */
+    simulated: boolean;
 }
 
 export type ExplanationDetail = ExplanationRef & {
     nextCheck: string | null;
+    /** Age of the cached narrative: when the row was first written. */
+    cachedAt: string;
     createdAt: string;
     updatedAt: string;
 };
@@ -61,7 +66,7 @@ function rowKey(key: RowKey): string {
     return `${key.entityType}|${key.entityId}|${key.filterHash}|${key.evidenceHash}`;
 }
 
-function toRef(row: Explanation): ExplanationRef {
+function toRef(row: Explanation, simulated: boolean): ExplanationRef {
     return {
         id: row.id,
         context: row.context as ExplanationContext,
@@ -70,6 +75,7 @@ function toRef(row: Explanation): ExplanationRef {
         text: row.text,
         evidenceIds: Array.isArray(row.evidenceIds) ? row.evidenceIds.map(String) : [],
         snapshotId: row.snapshotId,
+        simulated,
     };
 }
 
@@ -82,7 +88,8 @@ export class ExplanationService {
     constructor(
         private readonly repo = new ExplanationRepository(),
         private readonly queue = new ExplainQueue(),
-        private readonly model: string = Config.ai.gemini.model
+        private readonly model: string = Config.ai.gemini.model,
+        private readonly metaConnections = new MetaConnectionRepository()
     ) {}
 
     async ensure(input: EnsureExplanationInput): Promise<ExplanationRef> {
@@ -95,7 +102,7 @@ export class ExplanationService {
         if (inputs.length === 0) return [];
 
         const rows: InsertExplanation[] = [];
-        const keys: {scope: ExplanationScope; key: RowKey}[] = [];
+        const keys: {tenantId: string; scope: ExplanationScope; key: RowKey}[] = [];
 
         for (const input of inputs) {
             const filterHash = hashJson(input.filter);
@@ -119,6 +126,7 @@ export class ExplanationService {
             });
 
             keys.push({
+                tenantId: input.tenantId,
                 scope: {
                     accountId: input.accountId,
                     context: input.context,
@@ -136,7 +144,14 @@ export class ExplanationService {
             });
         }
 
-        await this.repo.insertPendingBatch(rows);
+        const simulatedByTenant = new Map<string, boolean>();
+        await Promise.all([
+            this.repo.insertPendingBatch(rows),
+            // One resolution per distinct tenant for the whole batch; a batch normally shares one.
+            ...[...new Set(inputs.map((input) => input.tenantId))].map(async (tenantId) => {
+                simulatedByTenant.set(tenantId, await this.resolveSimulated(tenantId));
+            }),
+        ]);
 
         const scopes = new Map<string, ExplanationScope>();
         for (const {scope} of keys) scopes.set(scopeKey(scope), scope);
@@ -155,7 +170,7 @@ export class ExplanationService {
 
         const enqueued = new Set<string>();
         const refs: ExplanationRef[] = [];
-        for (const {scope, key} of keys) {
+        for (const {tenantId, scope, key} of keys) {
             const entity = stored.get(`${scopeKey(scope)}|${rowKey(key)}`);
             if (entity === undefined) throw new Error("explanation row missing after insert");
 
@@ -164,7 +179,10 @@ export class ExplanationService {
                 await this.queue.add("explain", {id: entity.id}, {jobId: entity.id});
             }
 
-            refs.push(toRef(entity));
+            const simulated = simulatedByTenant.get(tenantId);
+            if (simulated === undefined) throw new Error("simulated flag missing for tenant");
+
+            refs.push(toRef(entity, simulated));
         }
 
         return refs;
@@ -175,10 +193,23 @@ export class ExplanationService {
         if (row === null) throw new NotFoundError("Penjelasan tidak ditemukan");
 
         return {
-            ...toRef(row),
+            ...toRef(row, await this.resolveSimulated(tenantId)),
             nextCheck: row.nextCheck,
+            cachedAt: row.createdAt.toISOString(),
             createdAt: row.createdAt.toISOString(),
             updatedAt: row.updatedAt.toISOString(),
         };
+    }
+
+    /**
+     * No production Meta app configured means no model call can ever reach Meta-backed analysis, and
+     * no stored connection means the same for this workspace. Both make every narrative a template
+     * stand-in, so the flag is a property of the tenant, not of the row.
+     */
+    private async resolveSimulated(tenantId: string): Promise<boolean> {
+        const appId = (Config.meta.appId ?? "").trim();
+        if (appId === "" || appId === "APP_ID") return true;
+
+        return (await this.metaConnections.findByTenantId(tenantId)) === null;
     }
 }

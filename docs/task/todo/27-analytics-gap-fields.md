@@ -6,39 +6,39 @@ Beberapa respons analitik sudah ada tetapi kehilangan field yang dijanjikan chec
 ## Daftar Pekerjaan
 
 ### 1. KPI sadar channel (F-08.2)
-- [ ] Tambah `applicable: boolean` pada `KpiCard` (`src/modules/analytics/service.ts`).
-- [ ] Aturan di `getSummary`:
+- [x] Tambah `applicable: boolean` pada `KpiCard` (`src/modules/analytics/service.ts`).
+- [x] Aturan di `getSummary`:
   - KPI percakapan (`leads`) hanya `applicable` bila scope memuat minimal satu ad set `objective_group = 'wa'`.
   - KPI pembelian/ROAS hanya `applicable` bila scope memuat `objective_group = 'web'`.
   - `cplQualified` hanya `applicable` bila scope memuat **satu** channel; dua channel → `applicable: false`, `value: null`, `note: "Biaya per hasil tidak sebanding lintas channel."`.
-- [ ] `campaignId` yang menunjuk campaign `web` → `cards.leads.applicable === false`, `value: null` (bukan `0`).
-- [ ] Hitung channel scope dari `ad_sets` (`select distinct objective_group from ad_sets where ...`), bukan dari nama campaign.
+- [x] `campaignId` yang menunjuk campaign `web` → `cards.leads.applicable === false`, `value: null` (bukan `0`).
+- [x] Hitung channel scope dari `ad_sets` (`select distinct objective_group from ad_sets where ...`), bukan dari nama campaign.
 
 ### 2. `warnings[]` + `data_freshness` (F-11.1)
-- [ ] Tambah `dataFreshness: {eventName: string; lastSeenAt: string | null; hoursOld: number | null; stale: boolean}[]` ke `TrackingHealthResponse`, dihitung dari `tracking_health_daily.date` terbaru per event; `stale = true` bila `hoursOld > 48` atau `null`.
-- [ ] Tambah `warnings: {code: string; level: "INFO"|"WARNING"|"CRITICAL"; message: string; route: string | null}[]` dengan kode:
+- [x] Tambah `dataFreshness: {eventName: string; lastSeenAt: string | null; hoursOld: number | null; stale: boolean}[]` ke `TrackingHealthResponse`, dihitung dari `tracking_health_daily.date` terbaru per event; `stale = true` bila `hoursOld > 48` atau `null`.
+- [x] Tambah `warnings: {code: string; level: "INFO"|"WARNING"|"CRITICAL"; message: string; route: string | null}[]` dengan kode:
   - `ATTRIBUTION_FRESHNESS` — `dataFreshness` punya event `stale`.
   - `PIXEL_EVENT_MISSING` — event kunci (`EMQ_KEY_EVENTS`) tanpa baris 7 hari terakhir.
   - `SYNC_FAILED` — `sync_runs` terbaru berstatus gagal.
   - `EMQ_LOW` — `emq.average < EMQ_THRESHOLD`.
   - `DEDUP_LOW` — `capi.dedupRate < DEDUP_WARNING`.
-- [ ] `warnings` kosong → `[]`, bukan `null`.
+- [x] `warnings` kosong → `[]`, bukan `null`.
 
 ### 3. Rule alert tambahan (F-11.2)
-- [ ] Tambah ke `AlertRuleKey` (`src/shared/alerts.ts`): `conversation_reconciliation` dan `sync_failed`.
-- [ ] `conversation_reconciliation`: bandingkan `onsite_conversion.messaging_conversation_started_7d` (Meta) dengan jumlah `conversation_messages` `INBOUND` pada periode yang sama; selisih > 10% → alert `WARNING` dengan `metric` = selisih dan `evidence` berisi kedua angka.
-- [ ] `sync_failed`: dipicu dari handler DLQ (`23-ops-production.md`); `entityId` = `jobName`, `impactCaption` = jumlah percobaan.
-- [ ] Daftarkan kedua rule di `EVALUATED_RULES` (`src/modules/alerts/evaluate.service.ts`) agar ikut auto-resolve saat kondisi hilang.
+- [x] Tambah ke `AlertRuleKey` (`src/shared/alerts.ts`): `conversation_reconciliation` dan `sync_failed`.
+- [x] `conversation_reconciliation`: bandingkan `onsite_conversion.messaging_conversation_started_7d` (Meta) dengan jumlah `conversation_messages` `INBOUND` pada periode yang sama; selisih > 10% → alert `WARNING` dengan `metric` = selisih dan `evidence` berisi kedua angka.
+- [x] `sync_failed`: dipicu dari handler DLQ (`23-ops-production.md`); `entityId` = `jobName`, `impactCaption` = jumlah percobaan.
+- [x] Daftarkan kedua rule di `EVALUATED_RULES` (`src/modules/alerts/evaluate.service.ts`) agar ikut auto-resolve saat kondisi hilang.
 
 ### 4. Field `lead_assessments` (F-12.1, F-12.2)
-- [ ] Migrasi `lead_assessments`: tambah `topic text`, `response_type text`, `mood text check (mood in ('positif','netral','negatif'))`, `quote text`, `reply_minutes integer`.
-- [ ] `AssessService` mengisi kelima kolom dari hasil AI; nilai yang tidak tersedia → `null`, tidak ditebak.
-- [ ] Tambah `priorLevel: "COLD"|"WARM"|"HOT"|null` pada `lead_assessments` (diisi level assessment sebelumnya yang `applied = true`), dan ekspos sebagai `prior_level` di `LeadListRow` dan `getLeadDetail.movement[]`.
-- [ ] `PipelineRow` dan `LeadListRow` menyertakan `topic` dan `responseType`.
-- [ ] Prompt assessment (`src/modules/audience/constants.ts` atau prompt terkait) diperluas agar mengembalikan kelima field; validasi nilai `mood`/`response_type` terhadap `SENTIMENTS`/`REPLY_TYPES` dan tolak nilai di luar enum (simpan `null` + log `warn`).
+- [x] Migrasi `lead_assessments`: tambah `topic text`, `response_type text`, `mood text check (mood in ('positif','netral','negatif'))`, `quote text`, `reply_minutes integer`.
+- [x] `AssessService` mengisi kelima kolom dari hasil AI; nilai yang tidak tersedia → `null`, tidak ditebak.
+- [x] Tambah `priorLevel: "COLD"|"WARM"|"HOT"|null` pada `lead_assessments` (diisi level assessment sebelumnya yang `applied = true`), dan ekspos sebagai `prior_level` di `LeadListRow` dan `getLeadDetail.movement[]`.
+- [x] `PipelineRow` dan `LeadListRow` menyertakan `topic` dan `responseType`.
+- [x] Prompt assessment (`src/modules/audience/constants.ts` atau prompt terkait) diperluas agar mengembalikan kelima field; validasi nilai `mood`/`response_type` terhadap `SENTIMENTS`/`REPLY_TYPES` dan tolak nilai di luar enum (simpan `null` + log `warn`).
 
 ### 5. KPI + ringkasan campaign di `/analytics/creatives` (F-15.1)
-- [ ] Tambah ke `CreativeListResponse`:
+- [x] Tambah ke `CreativeListResponse`:
   ```ts
   kpi: {spendMinor, impressions, count, assessed, conversations, purchases, hotShare},
   campaignSummary: [{campaignId, name, spendShare: number | null, messageCompleteness: number | null}],
@@ -51,16 +51,16 @@ Beberapa respons analitik sudah ada tetapi kehilangan field yang dijanjikan chec
   - `trend` maksimal 30 titik terakhir; `results` mengikuti objective group.
 
 ### 6. Pola kreatif: `supported` / `consistent` / `clear` (F-17.2)
-- [ ] Tambah ke `PatternRow` (`src/modules/creative/service.ts`):
+- [x] Tambah ke `PatternRow` (`src/modules/creative/service.ts`):
   - `supported: boolean` = `significant === true && withCount >= PATTERN_MIN_PER_SIDE && withoutCount >= PATTERN_MIN_PER_SIDE`.
   - `consistent: boolean` = arah selisih median biaya sama pada dua sub-periode (paruh pertama vs paruh kedua rentang).
   - `clear: boolean` = `supported && consistent`.
   - `medianYesMinor` / `medianNoMinor` = median biaya per hasil untuk kreatif dengan dan tanpa tag (nilai yang sudah ada di `withMedianCostPerResultMinor`/`withoutMedianCostPerResultMinor`, dipertahankan).
-- [ ] `state` dihitung ulang: `eligible_for_test` hanya bila `clear === true`; selain itu `no_clear_pattern` atau `insufficient_sample` sesuai gerbang.
+- [x] `state` dihitung ulang: `eligible_for_test` hanya bila `clear === true`; selain itu `no_clear_pattern` atau `insufficient_sample` sesuai gerbang.
 
 ### 7. Penanda narasi simulasi (F-09.4)
-- [ ] Tambah `simulated: boolean` pada `ExplanationRef` (`src/modules/explanations/service.ts`), `true` selama belum ada koneksi Meta produksi (`Config.meta.appId` kosong/placeholder atau `meta_connection` tidak ada).
-- [ ] Cache narasi tetap per `(context, entity, filter, snapshotId)` seperti sekarang; tambahkan `cachedAt` pada `ExplanationDetail` agar umur cache terlihat.
+- [x] Tambah `simulated: boolean` pada `ExplanationRef` (`src/modules/explanations/service.ts`), `true` selama belum ada koneksi Meta produksi (`Config.meta.appId` kosong/placeholder atau `meta_connection` tidak ada).
+- [x] Cache narasi tetap per `(context, entity, filter, snapshotId)` seperti sekarang; tambahkan `cachedAt` pada `ExplanationDetail` agar umur cache terlihat.
 
 ## File yang Disentuh
 - `src/modules/analytics/service.ts` (KPI)

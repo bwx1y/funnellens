@@ -155,6 +155,13 @@
       "when": 1795623667874,
       "tag": "0021_goofy_jackal",
       "breakpoints": true
+    },
+    {
+      "idx": 22,
+      "version": "7",
+      "when": 1795624721685,
+      "tag": "0022_striped_wind_dancer",
+      "breakpoints": true
     }
   ]
 }

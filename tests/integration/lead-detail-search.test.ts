@@ -275,6 +275,7 @@ describe("Lead detail and global search", () => {
             context: "lead_detail",
             state: "PENDING",
             source: null,
+            simulated: expect.any(Boolean),
             text: null,
             evidenceIds: [],
             snapshotId: expect.any(String),

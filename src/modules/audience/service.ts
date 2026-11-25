@@ -140,6 +140,9 @@ export interface PipelineRow {
     confidence: string;
     reason: string | null;
     evidenceWamid: string | null;
+    /** What the conversation was about and the lead's last reply type; omitted when not assessed. */
+    topic?: string;
+    responseType?: string;
     stage: string;
     adId: string | null;
     creativeId: string | null;
@@ -205,6 +208,11 @@ export interface LeadListRow {
     stage: string;
     campaignName: string | null;
     confidence: string | null;
+    /** From the newest applied assessment of this lead. */
+    topic: string | null;
+    responseType: string | null;
+    /** Level of the assessment before the newest one; `null` for the first assessment. */
+    priorLevel: "COLD" | "WARM" | "HOT" | null;
     waitingMinutes: number | null;
     createdAt: string;
     attribution: LeadAttribution;
@@ -233,6 +241,22 @@ export interface LeadMovementPoint {
     reason: string | null;
     confidence: string;
     applied: boolean;
+    /** Where the lead came from; `null` for the first assessment and the observation milestones. */
+    priorLevel: "COLD" | "WARM" | "HOT" | null;
+    topic: string | null;
+}
+
+/** The newest applied assessment of the lead, if there is one. */
+export interface LeadLatestAssessment {
+    level: "COLD" | "WARM" | "HOT";
+    confidence: string;
+    reason: string | null;
+    topic: string | null;
+    responseType: string | null;
+    quote: string | null;
+    /** Wait from the assessed inbound message to the CS reply, whole minutes. */
+    replyMinutes: number | null;
+    at: string;
 }
 
 export interface LeadTrailPoint {
@@ -268,6 +292,8 @@ export interface LeadDetailResponse {
         daysInPipeline: number | null;
     };
     movement: LeadMovementPoint[];
+    /** Newest applied assessment; `null` when the lead has never been assessed. */
+    latestAssessment: LeadLatestAssessment | null;
     trail: LeadTrailPoint[];
     explanation: ExplanationRef | null;
 }
@@ -640,6 +666,9 @@ export class AudienceService {
             confidence: row.confidence,
             reason: row.reason,
             evidenceWamid: row.evidenceWamid,
+            // Old assessments carry no topic/type: absent beats a null placeholder in these rows.
+            ...(row.topic === null ? {} : {topic: row.topic}),
+            ...(row.responseType === null ? {} : {responseType: row.responseType}),
             stage: row.stage,
             adId: row.adId,
             creativeId: row.creativeId,
@@ -844,6 +873,9 @@ export class AudienceService {
                     ? null
                     : campaignNames.get(lead.campaignId) ?? lead.campaignId,
                 confidence: assessments[index]?.confidence ?? null,
+                topic: assessments[index]?.topic ?? null,
+                responseType: assessments[index]?.responseType ?? null,
+                priorLevel: assessments[index]?.priorLevel ?? null,
                 waitingMinutes: lead.firstRepliedAt === null && lead.firstSeenAt !== null
                     ? Math.max(0, Math.floor((now - lead.firstSeenAt.getTime()) / 60_000))
                     : null,
@@ -962,7 +994,21 @@ export class AudienceService {
                 reason: point.reason,
                 confidence: point.confidence,
                 applied: point.applied,
+                priorLevel: point.priorLevel,
+                topic: point.topic,
             })),
+            latestAssessment: assessment === null
+                ? null
+                : {
+                    level: assessment.level,
+                    confidence: assessment.confidence,
+                    reason: assessment.reason,
+                    topic: assessment.topic,
+                    responseType: assessment.responseType,
+                    quote: assessment.quote,
+                    replyMinutes: assessment.replyMinutes,
+                    at: assessment.eventAt.toISOString(),
+                },
             trail: trail.map((message) => ({
                 at: message.sentAt.toISOString(),
                 direction: message.direction,

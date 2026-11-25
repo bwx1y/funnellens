@@ -247,7 +247,10 @@ describe("Analytics summary", () => {
         expect(result.cards.clicks.deltaPct).toBe(100);
         expect(result.cards.clicks.sparkline?.length).toBe(7);
         expect(result.cards.cplQualified.value).toBe(150000);
-        expect(result.cards.roas.value).toBe(2);
+        // The only ad set is a WhatsApp one: ROAS belongs to web campaigns, so the card stands down
+        // instead of dividing a purchase value Meta attributed to a messaging objective.
+        expect(result.cards.roas.applicable).toBe(false);
+        expect(result.cards.roas.value).toBeNull();
         expect(result.cards.funnelHealth.value).toBe(70);
         expect(result.cards.funnelHealth.badge).toBe("Perlu perhatian");
 

@@ -1,6 +1,10 @@
 import {requireAccountScope} from "@db/repositories/ad-account.repository";
 import {PixelSourceRepository, type PixelSource} from "@db/repositories/pixel-source.repository";
-import {TrackingHealthRepository, type TrackingHealthEvent} from "@db/repositories/tracking-health.repository";
+import {SyncRunRepository} from "@db/repositories/sync-run.repository";
+import {
+    TrackingHealthRepository,
+    type TrackingHealthEvent,
+} from "@db/repositories/tracking-health.repository";
 import {round4} from "@shared/numbers";
 import {ExplanationService, type ExplanationRef} from "@/modules/explanations/service";
 import {
@@ -17,11 +21,15 @@ import {
     EVENT_GATE,
     EVENT_SAMPLE_DENOMINATOR,
     browserShare,
+    buildDataFreshness,
+    buildTrackingWarnings,
     emqStatus,
     eventStatus,
     missingMatchKeys,
     orderEventNames,
+    type DataFreshnessEntry,
     type TrackingStatus,
+    type TrackingWarning,
 } from "@shared/tracking";
 
 export interface TrackingHealthQuery {
@@ -71,6 +79,10 @@ export interface TrackingHealthResponse {
     }[];
     /** The last 7 reconciled days; empty until the business records its own orders. */
     reconciliation: ReconciliationRow[];
+    /** One row per tracked event, newest snapshot per event; key events without data are stale. */
+    dataFreshness: DataFreshnessEntry[];
+    /** Always an array, in a fixed severity order; empty when nothing needs attention. */
+    warnings: TrackingWarning[];
     sample: SampleBlock;
     note?: string;
     explanation: ExplanationRef | null;
@@ -119,6 +131,7 @@ export class TrackingHealthService {
     constructor(
         private readonly pixelSourceRepo = new PixelSourceRepository(),
         private readonly trackingHealthRepo = new TrackingHealthRepository(),
+        private readonly syncRunRepo = new SyncRunRepository(),
         private readonly explanations = new ExplanationService(),
         private readonly reconciliationRepo = new PurchaseReconciliationRepository()
     ) {}
@@ -126,9 +139,12 @@ export class TrackingHealthService {
     async getTrackingHealth(tenantId: string, query: TrackingHealthQuery): Promise<TrackingHealthResponse> {
         const account = await requireAccountScope(tenantId, query.accountId);
 
-        const [pixels, summary, reconciliation] = await Promise.all([
+        const now = Date.now();
+        const [pixels, summary, latestPerEvent, latestSyncRun, reconciliation] = await Promise.all([
             this.pixelSourceRepo.findByAccountId(account.id),
             this.trackingHealthRepo.getLatestStatus(account.id),
+            this.trackingHealthRepo.getLatestPerEvent(account.id),
+            this.syncRunRepo.getLatestByAccountId(account.id),
             this.reconciliationRepo.findRecent(account.id, RECONCILIATION_WINDOW_DAYS),
         ]);
 
@@ -183,6 +199,20 @@ export class TrackingHealthService {
                 .filter((value): value is number => value !== null)
         );
 
+        const dataFreshness = buildDataFreshness({
+            latest: latestPerEvent,
+            keyEvents: EMQ_KEY_EVENTS,
+            now,
+        });
+        const syncFailure = latestSyncRun?.status === "FAILED" ? {error: latestSyncRun.error} : null;
+        const warnings = buildTrackingWarnings({
+            freshness: dataFreshness,
+            keyEvents: EMQ_KEY_EVENTS,
+            emqAverage: average,
+            dedupRate: capiDedup,
+            syncFailure,
+        });
+
         const n = summary.date === null ? 0 : summary.browserCount + summary.serverCount;
 
         const explanation = await this.explanations.ensure({
@@ -205,6 +235,8 @@ export class TrackingHealthService {
         return {
             date: summary.date,
             reconciliation,
+            dataFreshness,
+            warnings,
             pixel: {
                 connected: pixelRow === null ? null : true,
                 pixelId: pixelRow?.pixelId ?? null,

@@ -212,6 +212,30 @@ export class ConversationMessageRepository extends DatabaseRepository {
         }));
     }
 
+    /**
+     * Inbound chats in the period, one per conversation: the numerator the reconciliation alert compares
+     * against Meta's `messaging_conversation_started_7d`, so both sides count chats, not messages.
+     */
+    async countInboundConversations(
+        accountId: string,
+        since: Date,
+        until: Date,
+        campaignId?: string
+    ): Promise<number> {
+        const rows = await this.database.execute(sql`
+            select count(distinct coalesce(m.conversation_id::text, m.lead_id::text)) as total
+            from conversation_messages m
+            join leads l on l.id = m.lead_id
+            where l.account_id = ${accountId}
+              and m.direction = 'INBOUND'
+              and m.sent_at >= ${since.toISOString()}::timestamptz
+              and m.sent_at <= ${until.toISOString()}::timestamptz
+              ${campaignId === undefined ? sql`` : sql`and l.campaign_id = ${campaignId}`}
+        `) as unknown as {total: string}[];
+
+        return Number(rows[0]?.total ?? 0);
+    }
+
     /** Median of the first measured response per lead; `observedLeads` counts leads with any message. */
     async getTimedInsights(
         accountId: string,

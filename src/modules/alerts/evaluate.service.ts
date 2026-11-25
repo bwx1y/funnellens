@@ -4,6 +4,7 @@ import {
     type FunnelCounts,
     type LeadStageCounts,
 } from "@db/repositories/analytics.repository";
+import {ConversationMessageRepository} from "@db/repositories/conversation-message.repository";
 import {
     InsightAlertRepository,
     type InsightAlertUpsert,
@@ -20,6 +21,7 @@ import {
     HOT_LEAD_SCAN_LIMIT,
     HOT_LEAD_WAIT_MINUTES,
     LEAK_RULES,
+    conversationReconciliationGap,
     leakLevel,
     type AlertRuleKey,
 } from "@shared/alerts";
@@ -55,6 +57,10 @@ const EVALUATED_RULES: AlertRuleKey[] = [
     "unreplied_hot_lead",
     "creative_fatigue",
     "tracking_emq",
+    "conversation_reconciliation",
+    // `sync_failed` is deliberately absent: `MetaSyncDeadLetter.clearAlert` resolves that row on the
+    // next successful sync, and this evaluator never emits it. Listing it here would close a live
+    // failure alert on the next hourly run, before anything proved the sync works again.
 ];
 
 /** The Meta columns come from the funnel query; lead counts replace the four cross stages. */
@@ -94,7 +100,8 @@ export class AlertEvaluateService {
         private readonly trackingHealthRepo = new TrackingHealthRepository(),
         private readonly pixelSourceRepo = new PixelSourceRepository(),
         private readonly alertRepo = new InsightAlertRepository(),
-        private readonly creativeService = new CreativeService()
+        private readonly creativeService = new CreativeService(),
+        private readonly conversationMessageRepo = new ConversationMessageRepository()
     ) {}
 
     /** Builds the alert rows of one account and period without writing to `insight_alerts`. */
@@ -111,6 +118,7 @@ export class AlertEvaluateService {
             latestStatus,
             pixelSources,
             hotLeads,
+            observedConversations,
         ] = await Promise.all([
             this.analyticsRepo.getFunnelCounts(accountId, period.start, period.end, undefined, "wa"),
             this.analyticsRepo.getFunnelCounts(accountId, period.prevStart, period.prevEnd, undefined, "wa"),
@@ -120,6 +128,7 @@ export class AlertEvaluateService {
             this.trackingHealthRepo.getLatestStatus(accountId),
             this.pixelSourceRepo.findByAccountId(accountId),
             this.leadRepo.getUnrepliedHotLeads(accountId, HOT_LEAD_SCAN_LIMIT),
+            this.conversationMessageRepo.countInboundConversations(accountId, period.start, period.end),
         ]);
 
         const trackingState = trackingStateOf(trackingSummary);
@@ -256,6 +265,42 @@ export class AlertEvaluateService {
                 sampleSize: null,
                 route: "/tracking-health",
                 evidence: {emqAvg, dedupRate: dedup, date: latestStatus.date},
+            });
+        }
+
+        const gap = conversationReconciliationGap({
+            metaConversations: meta.messagingStarted,
+            observedConversations,
+        });
+        if (gap.breached) {
+            const caption = gap.difference >= 0
+                ? `≈${gap.difference} percakapan tidak tercatat`
+                : `≈${Math.abs(gap.difference)} percakapan tidak teratribusi di Meta`;
+
+            alerts.push({
+                accountId,
+                ruleKey: "conversation_reconciliation",
+                level: "WARNING",
+                entityType: "account",
+                entityId: "",
+                status: "ACTIVE",
+                title: "Jumlah percakapan tidak cocok dengan Meta",
+                body: `Meta mencatat ${meta.messagingStarted} percakapan; inbox mencatat ` +
+                    `${observedConversations} percakapan pada periode ini.`,
+                metric: "difference",
+                impactMinor: null,
+                impactCaption: caption,
+                confidence: "sedang",
+                sampleSize: observedConversations,
+                route: "/tracking-health",
+                evidence: {
+                    metaConversations: meta.messagingStarted,
+                    observedConversations,
+                    difference: gap.difference,
+                    rate: gap.rate,
+                    since: period.since,
+                    until: period.until,
+                },
             });
         }
 

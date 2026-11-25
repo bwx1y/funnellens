@@ -1,6 +1,7 @@
 import {DatabaseRepository} from "./base.repository";
 import {PixelSourceEntity} from "@db/schema/ads/pixel-source.entity";
-import {eq, sql} from "drizzle-orm";
+import {AdSetEntity} from "@db/schema/ads/ad-set.entity";
+import {and, eq, sql} from "drizzle-orm";
 import {ATTRIBUTION_WINDOW} from "./ad-insight-daily.repository";
 import type {FunnelObjectiveGroup} from "@shared/funnel";
 
@@ -518,6 +519,50 @@ export class AnalyticsRepository extends DatabaseRepository {
                 firstSeen: row.first_seen,
             };
         });
+    }
+
+    /**
+     * Objective groups the scope actually delivered: the KPI cards are only meaningful for a channel the
+     * account ran, and a campaign filter narrows the answer to that campaign's ad sets.
+     */
+    async getObjectiveGroups(accountId: string, campaignId?: string): Promise<("wa" | "web")[]> {
+        const rows = await this.database.selectDistinct({objectiveGroup: AdSetEntity.objectiveGroup})
+            .from(AdSetEntity)
+            .where(and(
+                eq(AdSetEntity.accountId, accountId),
+                campaignId === undefined ? undefined : eq(AdSetEntity.campaignId, campaignId)
+            ));
+
+        return rows
+            .map((row) => row.objectiveGroup)
+            .filter((group): group is "wa" | "web" => group === "wa" || group === "web");
+    }
+
+    /** Spend per creative per campaign in the window, for the creative KPI's campaign summary. */
+    async getCreativeCampaignSpend(
+        accountId: string,
+        since: Date,
+        until: Date,
+        campaignId?: string
+    ): Promise<{creativeId: string; campaignId: string; campaignName: string | null; spendMinor: number}[]> {
+        const rows = await this.database.execute(sql`
+            select ad.creative_id              as creative_id,
+                   ad.campaign_id              as campaign_id,
+                   c.name                      as campaign_name,
+                   coalesce(sum(i.spend_minor), 0) as spend_minor
+            from ad_insight_metrics i
+            join ads ad on ad.id = i.ad_id
+            left join campaigns c on c.id = ad.campaign_id
+            where ${this.insightScope(accountId, since, until, {campaignId})}
+            group by ad.creative_id, ad.campaign_id, c.name
+        `) as unknown as {creative_id: string; campaign_id: string; campaign_name: string | null; spend_minor: string}[];
+
+        return rows.map((row) => ({
+            creativeId: row.creative_id,
+            campaignId: row.campaign_id,
+            campaignName: row.campaign_name,
+            spendMinor: Number(row.spend_minor),
+        }));
     }
 
     /**

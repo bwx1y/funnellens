@@ -61,7 +61,7 @@ export class MetaSyncDeadLetter {
                 body: `Job ${jobName} berhenti setelah ${attemptsMade} percobaan: ${error}`,
                 metric: "attemptsMade",
                 impactMinor: null,
-                impactCaption: null,
+                impactCaption: `${attemptsMade} percobaan`,
                 confidence: null,
                 sampleSize: null,
                 route: "/app/insights",

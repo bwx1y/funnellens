@@ -52,9 +52,12 @@ export class LeadAssessmentRepository extends DatabaseRepository {
 
         const maxEventAt = latest?.max_event_at ?? null;
         const applied = maxEventAt === null || assessment.eventAt >= new Date(maxEventAt);
+        // The predecessor is whichever applied row the lead carried before this one; a replayed
+        // (non-applied) row has no position in the timeline, so it records none.
+        const priorLevel = applied ? (await this.latestByLead(assessment.leadId, tx))?.level ?? null : null;
 
         const [inserted] = await db.insert(LeadAssessmentEntity)
-            .values({...assessment, applied})
+            .values({...assessment, applied, priorLevel})
             .onConflictDoNothing({
                 target: [
                     LeadAssessmentEntity.leadId,
@@ -133,8 +136,10 @@ export class LeadAssessmentRepository extends DatabaseRepository {
     }
 
     /** Latest applied row: unavailability markers and replayed rows never surface as a level. */
-    async latestByLead(leadId: number): Promise<LeadAssessment | null> {
-        const [entity] = await this.database.select()
+    async latestByLead(leadId: number, tx?: DatabaseTransaction): Promise<LeadAssessment | null> {
+        const db = (tx ?? this.database) as typeof this.database;
+
+        const [entity] = await db.select()
             .from(LeadAssessmentEntity)
             .where(and(
                 eq(LeadAssessmentEntity.leadId, leadId),
@@ -198,17 +203,23 @@ export class LeadAssessmentRepository extends DatabaseRepository {
         reason: string | null;
         confidence: string;
         applied: boolean;
+        priorLevel: "COLD" | "WARM" | "HOT" | null;
+        topic: string | null;
+        responseType: string | null;
     }[]> {
         const rows = await this.database.execute(sql`
-            select m.level, m.at, m.reason, m.confidence, m.applied
+            select m.level, m.at, m.reason, m.confidence, m.applied, m.topic, m.response_type,
+                   m.prior_level
             from (
                 select a.level, a.event_at as at, a.reason, a.confidence, a.applied,
+                       a.topic, a.response_type, a.prior_level,
                        0 as kind, a.created_at as tie
                 from lead_assessments a
                 where a.lead_id = ${leadId}
                 union all
                 select lm.level, lm.first_at as at, null::text as reason, 'teramati' as confidence,
-                       true as applied, 1 as kind, lm.first_at as tie
+                       true as applied, null::text as topic, null::text as response_type,
+                       null::"lead_temperature" as prior_level, 1 as kind, lm.first_at as tie
                 from lead_milestones lm
                 where lm.lead_id = ${leadId}
             ) m
@@ -219,6 +230,9 @@ export class LeadAssessmentRepository extends DatabaseRepository {
             reason: string | null;
             confidence: string;
             applied: boolean;
+            topic: string | null;
+            response_type: string | null;
+            prior_level: "COLD" | "WARM" | "HOT" | null;
         }[];
 
         return rows.map((row) => ({
@@ -227,6 +241,9 @@ export class LeadAssessmentRepository extends DatabaseRepository {
             reason: row.reason,
             confidence: row.confidence,
             applied: row.applied,
+            priorLevel: row.prior_level,
+            topic: row.topic,
+            responseType: row.response_type,
         }));
     }
 
@@ -246,6 +263,8 @@ export class LeadAssessmentRepository extends DatabaseRepository {
         confidence: string;
         reason: string | null;
         evidenceWamid: string | null;
+        topic: string | null;
+        responseType: string | null;
         stage: string;
         adId: string | null;
         creativeId: string | null;
@@ -260,12 +279,14 @@ export class LeadAssessmentRepository extends DatabaseRepository {
             select l.id as lead_id, l.name, l.phone_masked,
                    a.level, a.confidence, a.reason,
                    a.evidence->>'wamid' as evidence_wamid,
+                   a.topic, a.response_type, a.prior_level,
                    l.stage, l.ad_id, l.creative_id, l.first_seen_at, l.first_replied_at,
                    l.attribution_method, l.attribution_confidence,
                    mw.first_at as warm_at, mh.first_at as hot_at
             from leads l
             join lateral (
-                select x.level, x.confidence, x.reason, x.evidence, x.event_at
+                select x.level, x.confidence, x.reason, x.evidence, x.event_at,
+                       x.topic, x.response_type, x.prior_level
                 from lead_assessments x
                 where x.lead_id = l.id and x.applied = true
                 order by x.event_at desc, x.created_at desc
@@ -285,6 +306,9 @@ export class LeadAssessmentRepository extends DatabaseRepository {
             confidence: string;
             reason: string | null;
             evidence_wamid: string | null;
+            topic: string | null;
+            response_type: string | null;
+            prior_level: "COLD" | "WARM" | "HOT" | null;
             stage: string;
             ad_id: string | null;
             creative_id: string | null;
@@ -304,6 +328,9 @@ export class LeadAssessmentRepository extends DatabaseRepository {
             confidence: row.confidence,
             reason: row.reason,
             evidenceWamid: row.evidence_wamid,
+            topic: row.topic,
+            responseType: row.response_type,
+            priorLevel: row.prior_level,
             stage: row.stage,
             adId: row.ad_id,
             creativeId: row.creative_id,

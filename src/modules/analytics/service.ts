@@ -109,6 +109,8 @@ export interface KpiCard {
     deltaPct: number | null;
     direction?: DeltaDirection | null;
     sparkline: (number | null)[] | null;
+    /** `false` when the scope ran no channel this number is about: `value` is then `null`, never `0`. */
+    applicable: boolean;
     note?: string;
 }
 
@@ -389,6 +391,7 @@ export class AnalyticsService {
             perf,
             campaigns,
             leadMetrics,
+            objectiveGroups,
         ] = await Promise.all([
             this.analyticsRepo.getFunnelCounts(accountId, start, end, campaignId),
             this.analyticsRepo.getFunnelCounts(accountId, prevStart, prevEnd, campaignId),
@@ -405,6 +408,7 @@ export class AnalyticsService {
             this.insightDailyRepo.getCampaignPerformance(accountId, start, end),
             this.campaignRepo.findByAccountId(accountId),
             this.analyticsRepo.getCampaignLeadMetrics(accountId, start, end),
+            this.analyticsRepo.getObjectiveGroups(accountId, campaignId),
         ]);
 
         const bucket = (date: string) => bucketIndex(date, since, days);
@@ -436,25 +440,41 @@ export class AnalyticsService {
         const qualified = stages.qualified;
         const previousQualified = previousStages.qualified;
 
+        // A KPI is only meaningful for a channel the scope actually ran: `wa` for conversations,
+        // `web` for purchases, and a single channel for any cross-channel cost ratio.
+        const hasWa = objectiveGroups.includes("wa");
+        const hasWeb = objectiveGroups.includes("web");
+
         const spendDelta = percentChange(current.spendMinor, previous.spendMinor);
         const spendCard: KpiCard = {
             value: current.spendMinor,
             deltaPct: spendDelta,
             direction: direction(spendDelta),
             sparkline: spendByBucket,
+            applicable: true,
         };
         if (spendDelta === null) {
             spendCard.note = "Perbandingan tidak tersedia karena periode sebelumnya tanpa belanja.";
         }
 
         const leadsDelta = percentChange(current.messagingStarted, previous.messagingStarted);
-        const leadsCard: KpiCard = {
-            value: current.messagingStarted,
-            deltaPct: leadsDelta,
-            direction: direction(leadsDelta),
-            sparkline: leadsByBucket,
-        };
-        if (leadsDelta === null) {
+        const leadsCard: KpiCard = hasWa
+            ? {
+                value: current.messagingStarted,
+                deltaPct: leadsDelta,
+                direction: direction(leadsDelta),
+                sparkline: leadsByBucket,
+                applicable: true,
+            }
+            : {
+                value: null,
+                deltaPct: null,
+                direction: null,
+                sparkline: null,
+                applicable: false,
+                note: "Akun ini tidak menjalankan kampanye WhatsApp pada periode ini.",
+            };
+        if (hasWa && leadsDelta === null) {
             leadsCard.note = "Perbandingan tidak tersedia karena periode sebelumnya tanpa lead.";
         }
 
@@ -464,30 +484,48 @@ export class AnalyticsService {
             deltaPct: clicksDelta,
             direction: direction(clicksDelta),
             sparkline: clicksByBucket,
+            applicable: true,
         };
         if (clicksDelta === null) {
             clicksCard.note = "Perbandingan tidak tersedia karena periode sebelumnya tanpa klik tautan.";
         }
 
-        const cplQualified = qualified > 0 ? Math.round(current.spendMinor / qualified) : null;
-        const cplDelta = qualified > 0 && previousQualified > 0
+        const cplApplicable = objectiveGroups.length === 1;
+        const cplQualified = cplApplicable && qualified > 0
+            ? Math.round(current.spendMinor / qualified)
+            : null;
+        const cplDelta = cplApplicable && qualified > 0 && previousQualified > 0
             ? percentChange(current.spendMinor / qualified, previous.spendMinor / previousQualified)
             : null;
-        const cplCard: KpiCard = {
-            value: cplQualified,
-            deltaPct: cplDelta,
-            direction: direction(cplDelta),
-            sparkline: cplSparkline,
-        };
-        if (cplQualified === null) {
-            cplCard.note = "Belum ada lead qualified pada periode ini";
-        } else if (cplDelta === null) {
-            cplCard.note = "Perbandingan tidak tersedia karena periode sebelumnya tanpa lead qualified.";
+        const cplCard: KpiCard = cplApplicable
+            ? {
+                value: cplQualified,
+                deltaPct: cplDelta,
+                direction: direction(cplDelta),
+                sparkline: cplSparkline,
+                applicable: true,
+            }
+            : {
+                value: null,
+                deltaPct: null,
+                direction: null,
+                sparkline: null,
+                applicable: false,
+                note: objectiveGroups.length > 1
+                    ? "Biaya per hasil tidak sebanding lintas channel."
+                    : "Tidak ada channel yang berjalan pada periode ini.",
+            };
+        if (cplApplicable) {
+            if (cplQualified === null) {
+                cplCard.note = "Belum ada lead qualified pada periode ini";
+            } else if (cplDelta === null) {
+                cplCard.note = "Perbandingan tidak tersedia karena periode sebelumnya tanpa lead qualified.";
+            }
         }
 
         // ROAS is only meaningful when Meta reported purchases at all; a zero purchase value would
         // render as a real 0,00x and read as "the ads sold nothing" instead of "no data".
-        const purchasesAvailable = current.purchase !== null;
+        const purchasesAvailable = hasWeb && current.purchase !== null;
         const roas = purchasesAvailable && current.spendMinor > 0
             ? round4(current.purchaseValueMinor / current.spendMinor)
             : null;
@@ -495,18 +533,30 @@ export class AnalyticsService {
             ? round4(previous.purchaseValueMinor / previous.spendMinor)
             : null;
         const roasDelta = roas !== null && previousRoas !== null ? percentChange(roas, previousRoas) : null;
-        const roasCard: KpiCard = {
-            value: roas,
-            deltaPct: roasDelta,
-            direction: direction(roasDelta),
-            sparkline: roasSparkline,
-        };
-        if (!purchasesAvailable) {
-            roasCard.note = "Event purchase tidak tersedia pada periode ini.";
-        } else if (roas === null) {
-            roasCard.note = "Belanja iklan nol pada periode ini";
-        } else if (roasDelta === null) {
-            roasCard.note = "Perbandingan tidak tersedia karena periode sebelumnya tanpa belanja.";
+        const roasCard: KpiCard = hasWeb
+            ? {
+                value: roas,
+                deltaPct: roasDelta,
+                direction: direction(roasDelta),
+                sparkline: roasSparkline,
+                applicable: true,
+            }
+            : {
+                value: null,
+                deltaPct: null,
+                direction: null,
+                sparkline: null,
+                applicable: false,
+                note: "Akun ini tidak menjalankan kampanye web pada periode ini.",
+            };
+        if (hasWeb) {
+            if (!purchasesAvailable) {
+                roasCard.note = "Event purchase tidak tersedia pada periode ini.";
+            } else if (roas === null) {
+                roasCard.note = "Belanja iklan nol pada periode ini";
+            } else if (roasDelta === null) {
+                roasCard.note = "Perbandingan tidak tersedia karena periode sebelumnya tanpa belanja.";
+            }
         }
 
         const health = funnelHealth({
@@ -522,6 +572,7 @@ export class AnalyticsService {
             deltaPct: null,
             direction: null,
             sparkline: null,
+            applicable: true,
             badge: health.badge,
             note: health.score === null
                 ? "Komponen pengukuran belum cukup"

@@ -11,7 +11,7 @@ import {TenantRepository} from "@db/repositories/tenant.repository";
 import {GeminiAdapter} from "@infra/ai/adapters/gemini.adapter";
 import type {AIGenerateOptions, AIMessage, AIResponse} from "@infra/ai/types";
 import {Config} from "@/config";
-import {CONFIDENCE_LEVELS, REPLY_TYPES, SENTIMENTS, TEMPERATURE_LEVELS} from "@shared/audience";
+import {CONFIDENCE_LEVELS, REPLY_TYPES, SENTIMENTS, TEMPERATURE_LEVELS, type ReplyType, type Sentiment} from "@shared/audience";
 import {logger} from "@shared/logger";
 import {maskText} from "@shared/phone";
 import {
@@ -45,8 +45,64 @@ export interface AssessmentModel {
 
 type TenantContext = {name: string; address: string | null} | null;
 
-/** Returns the reason the decision is unusable, or `null` when it passes every check. */
-export function validateEvidence(decision: Decision, messages: {wamid: string | null}[]): string | null {
+/**
+ * The five persisted assessment fields. Only `topic` and `quote` are asked from the model;
+ * `responseType`/`mood` come from the decision vocabulary and `replyMinutes` is measured here.
+ */
+interface AssessmentFields {
+    responseType: ReplyType | null;
+    mood: Sentiment | null;
+    topic: string | null;
+    quote: string | null;
+}
+
+/** Free-text model output: empty or blank means "not said", so it is stored as `null`, never `""`. */
+function textOrNull(value: string | null | undefined): string | null {
+    const trimmed = (value ?? "").trim();
+    return trimmed === "" ? null : trimmed;
+}
+
+/** Closed vocabulary: a value outside the list is logged and stored as `null`, never guessed. */
+function vocabularyOrNull<const T extends readonly string[]>(
+    values: T,
+    value: string | null | undefined,
+    context: {leadId: number; field: string}
+): T[number] | null {
+    const trimmed = (value ?? "").trim();
+    if (trimmed === "") return null;
+    if ((values as readonly string[]).includes(trimmed)) return trimmed as T[number];
+
+    logger.warn(
+        {leadId: context.leadId, field: context.field, value: trimmed},
+        "Lead assessment value outside its vocabulary: stored as null"
+    );
+    return null;
+}
+
+function mapDecisionFields(decision: Decision, leadId: number): AssessmentFields {
+    return {
+        responseType: vocabularyOrNull(REPLY_TYPES, decision.responseType, {leadId, field: "responseType"}),
+        mood: vocabularyOrNull(SENTIMENTS, decision.sentiment, {leadId, field: "sentiment"}),
+        topic: textOrNull(decision.topic),
+        quote: textOrNull(decision.quote),
+    };
+}
+
+/**
+ * Returns the reason the decision is unusable, or `null` when it passes every check. The nullable
+ * vocabulary fields only reject values they can still read: `null` means "unavailable, store it".
+ */
+export function validateEvidence(
+    decision: {
+        evidenceWamid: string;
+        level: string;
+        confidence: string;
+        responseType: string | null;
+        sentiment: string | null;
+        reason: string;
+    },
+    messages: {wamid: string | null}[]
+): string | null {
     const evidenceWamid = (decision.evidenceWamid ?? "").trim();
     if (evidenceWamid === "") return "evidenceWamid kosong";
     if (!messages.some((message) => message.wamid === evidenceWamid)) {
@@ -58,10 +114,10 @@ export function validateEvidence(decision: Decision, messages: {wamid: string | 
     if (!(CONFIDENCE_LEVELS as readonly string[]).includes(decision.confidence)) {
         return `confidence ${decision.confidence} tidak dikenal`;
     }
-    if (!(REPLY_TYPES as readonly string[]).includes(decision.responseType)) {
+    if (decision.responseType !== null && !(REPLY_TYPES as readonly string[]).includes(decision.responseType)) {
         return `responseType ${decision.responseType} tidak dikenal`;
     }
-    if (!(SENTIMENTS as readonly string[]).includes(decision.sentiment)) {
+    if (decision.sentiment !== null && !(SENTIMENTS as readonly string[]).includes(decision.sentiment)) {
         return `sentiment ${decision.sentiment} tidak dikenal`;
     }
     if ((decision.reason ?? "").trim() === "") return "reason kosong";
@@ -177,16 +233,30 @@ export class LeadAssessmentService {
             return;
         }
 
-        const {decision, signals, model} = outcome;
+        const {decision, fields, signals, model} = outcome;
+        const pair = pairReply({
+            sentAt: message.sentAt,
+            ...(await this.messageRepo.findReplyCandidates(lead.id, message.wamid ?? "", message.sentAt)),
+        });
+        // Server-side measurement from the paired CS reply; the model is never asked for it.
+        const replyMinutes = pair === null
+            ? null
+            : Math.max(0, Math.round(pair.responseSeconds / 60));
+
         const stored = await this.assessmentRepo.applyAssessment({
             leadId: lead.id,
             level: decision.level,
             confidence: decision.confidence,
             reason: decision.reason,
+            topic: fields.topic,
+            responseType: fields.responseType,
+            mood: fields.mood,
+            quote: fields.quote,
+            replyMinutes,
             evidence: {
                 wamid: decision.evidenceWamid,
-                responseType: decision.responseType,
-                sentiment: decision.sentiment,
+                responseType: fields.responseType,
+                sentiment: fields.mood,
                 signals,
             },
             eventAt: message.sentAt,
@@ -194,17 +264,19 @@ export class LeadAssessmentService {
             model,
         });
 
-        const pair = pairReply({
-            sentAt: message.sentAt,
-            ...(await this.messageRepo.findReplyCandidates(lead.id, message.wamid ?? "", message.sentAt)),
-        });
-
-        await this.messageRepo.applyClassification({
-            messageId: message.id,
-            responseType: decision.responseType,
-            sentiment: decision.sentiment,
-            pair,
-        });
+        if (fields.responseType === null || fields.mood === null) {
+            logger.warn(
+                {leadId: lead.id, messageId: message.id, responseType: fields.responseType, mood: fields.mood},
+                "Lead message left unclassified: vocabulary outside the enum stored as null"
+            );
+        } else {
+            await this.messageRepo.applyClassification({
+                messageId: message.id,
+                responseType: fields.responseType,
+                sentiment: fields.mood,
+                pair,
+            });
+        }
 
         if (input.enqueueReplay && !stored.applied) {
             await this.queue.add("reassess", {leadId: lead.id, from: message.sentAt.toISOString()}, {
@@ -218,7 +290,8 @@ export class LeadAssessmentService {
         window: ConversationMessage[],
         tenant: TenantContext
     ): Promise<
-        {ok: true; decision: Decision; signals: Signal[]; model: string} | {ok: false; error: string}
+        | {ok: true; decision: Decision; fields: AssessmentFields; signals: Signal[]; model: string}
+        | {ok: false; error: string}
     > {
         if (this.ai.apiKeys.length === 0) {
             return {ok: false, error: "GEMINI_API_KEYS belum diisi"};
@@ -252,11 +325,17 @@ export class LeadAssessmentService {
                     },
                 ], DECISION_SCHEMA, {temperature: 0});
 
-                const problem = validateEvidence(level2.data, window);
+                const fields = mapDecisionFields(level2.data, lead.id);
+                const problem = validateEvidence({
+                    ...level2.data,
+                    responseType: fields.responseType,
+                    sentiment: fields.mood,
+                }, window);
                 if (problem === null) {
                     return {
                         ok: true,
                         decision: level2.data,
+                        fields,
                         signals: level1.data.signals ?? [],
                         model: level2.model,
                     };

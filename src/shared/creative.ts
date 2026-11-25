@@ -367,6 +367,20 @@ export function costPattern(
     };
 }
 
+/**
+ * Direction of a pattern inside one half of the window: the sign of
+ * `median(tagged) − median(untagged)`. A missing median or a tie returns `null`, which can never
+ * match the other half and therefore never counts as consistent.
+ */
+export function medianGapSign(tagged: number[], untagged: number[]): -1 | 1 | null {
+    const taggedMedian = median(tagged);
+    const untaggedMedian = median(untagged);
+    if (taggedMedian === null || untaggedMedian === null) return null;
+
+    const gap = taggedMedian - untaggedMedian;
+    return gap === 0 ? null : gap > 0 ? 1 : -1;
+}
+
 export function experimentState(hasAccess: boolean, studyCount: number, hasResult: boolean): ExperimentState {
     if (!hasAccess) return "permission_missing";
     if (studyCount === 0) return "no_studies";
