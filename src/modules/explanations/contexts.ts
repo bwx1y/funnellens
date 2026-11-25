@@ -35,6 +35,13 @@ export const EXPLANATION_CONTEXTS: Record<ExplanationContext, ContextDefinition>
         fallback: "Konversi {transition} bergerak dari {previous} ke {current}. Periksa campaign yang menyumbang perubahan terbesar.",
         fallbackDown: "Konversi {transition} turun dari {previous} ke {current}. Periksa campaign yang menyumbang penurunan terbesar.",
     },
+    funnel_stage: {
+        label: "Tahap funnel",
+        required: ["stage", "current", "previous"],
+        nextChecks: ["campaign", "tracking", "reply_speed", "landing_page"],
+        fallback: "Tahap {stage} bergerak dari {previous} ke {current} dengan konversi {rate}. Periksa campaign dan kecepatan balas CS.",
+        fallbackDown: "Tahap {stage} turun dari {previous} ke {current} dengan konversi {rate}. Periksa campaign dan kecepatan balas CS.",
+    },
     velocity: {
         label: "Kecepatan balas CS",
         required: ["avg"],

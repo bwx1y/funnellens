@@ -196,6 +196,14 @@ describe("Analytics funnel", () => {
         expect(result.stages[0].estimated).toBeUndefined();
         expect(result.stages[2].rateFromFirst).toBe(0.018);
         expect(result.stages[0].rateFromFirst).toBe(1);
+        expect(result.stageCount).toBe(7);
+        expect(result.stageKeys).toEqual(result.stages.map((stage) => stage.key));
+        expect(result.stages.map((stage) => stage.previousValue)).toEqual([12000, 1000, 250, 0, 0, 0, 0]);
+        expect(result.stages.map((stage) => stage.changeCount)).toEqual([-2000, -100, -70, 3, 2, 1, 1]);
+        expect(result.stages[0].share).toBe(1);
+        expect(result.stages[1].share).toBe(0.09);
+        expect(result.stages[2].share).toBe(0.018);
+        expect(result.priorityStage).toEqual({from: "link_clicks", to: "messaging_started", deltaPp: -5});
 
         expect(result.pairs[0]).toMatchObject({
             from: "impressions",
@@ -268,6 +276,17 @@ describe("Analytics funnel", () => {
             impactMinor: null,
             impactCaption: "≈45 chat hilang",
             note: null,
+            campaigns: [
+                {
+                    campaignId,
+                    name: `Funnel Campaign ${u}`,
+                    rate: 0.2,
+                    baseline: 0.25,
+                    deltaPp: -5,
+                    estimatedGap: 45,
+                    eligible: true,
+                },
+            ],
             explanation: {
                 id: expect.any(String),
                 context: "funnel_leak",
@@ -317,6 +336,23 @@ describe("Analytics funnel", () => {
             conversionRate: 0.2,
             status: "perlu_perhatian",
         });
+        expect(result.history).toEqual([
+            {since: "2026-03-01", until: "2026-03-02", label: "1–2 Mar 2026", value: 180},
+            {since: "2026-02-27", until: "2026-02-28", label: "27–28 Feb 2026", value: 250},
+        ]);
+        expect(result.checks).toEqual([
+            {key: "reply_speed", label: "Periksa kecepatan balas CS", route: "/app/audience", done: false},
+            {key: "ctwa_attribution", label: "Cek atribusi CTWA pada lead baru", route: "/app/tracking", done: false},
+        ]);
+        expect(result.explanation).toEqual({
+            id: expect.any(String),
+            context: "funnel_stage",
+            state: "PENDING",
+            source: null,
+            text: null,
+            evidenceIds: [],
+            snapshotId: `${SINCE}..${UNTIL}`,
+        });
         expect(result.note).toBeUndefined();
     });
 
@@ -340,6 +376,9 @@ describe("Analytics funnel", () => {
         expect(funnel.stages.every((stage) => stage.value === 0)).toBe(true);
         expect(funnel.stages.every((stage) => stage.rateFromFirst === null)).toBe(true);
         expect(funnel.pairs.every((pair) => pair.rate === null && !pair.eligible)).toBe(true);
+        expect(funnel.priorityStage).toBeNull();
+        expect(funnel.stageCount).toBe(7);
+        expect(funnel.stages.every((stage) => stage.previousValue === 0 && stage.share === null)).toBe(true);
         expect(funnel.note).toBe(TRACKING_NOTE);
 
         const leakage = await service.getLeakage(tenantId, {accountId: emptyAccountId, since: SINCE, until: UNTIL});
@@ -348,6 +387,68 @@ describe("Analytics funnel", () => {
         expect(leakage.impactCaption).toBeNull();
         expect(leakage.trackingState).toBe("unknown");
         expect(leakage.note).toBe(COVERAGE_NOTE);
+        expect(leakage.campaigns).toEqual([]);
+    });
+
+    it("reports the leak of each trailing window, newest first", async () => {
+        const result = await service.getLeakHistory(tenantId, {accountId, since: SINCE, until: UNTIL});
+
+        expect(result.objectiveGroup).toBe("wa");
+        expect(result.periods).toEqual([
+            {
+                since: "2026-03-01",
+                until: "2026-03-02",
+                label: "1–2 Mar 2026",
+                transition: "link_clicks→messaging_started",
+                rate: 0.2,
+                baseline: 0.25,
+                deltaPp: -5,
+                estimatedGap: 45,
+                severity: "WARNING",
+            },
+            {
+                since: "2026-02-27",
+                until: "2026-02-28",
+                label: "27–28 Feb 2026",
+                transition: null,
+                rate: null,
+                baseline: null,
+                deltaPp: null,
+                estimatedGap: null,
+                severity: null,
+            },
+        ]);
+        expect(result.stages.length).toBe(7);
+        expect(result.stages[0]).toEqual({
+            key: "impressions",
+            label: "Tayangan",
+            values: [10000, 12000],
+        });
+        // No lead rows in the older window: a null, never a fabricated zero.
+        expect(result.stages[3].values).toEqual([3, null]);
+        expect(result.sample).toEqual({n: 10000, denominator: 100, eligible: true, gate: "≥ 100 tayangan"});
+        expect(result.note).toBeUndefined();
+    });
+
+    it("caps the leak history at four windows and nulls the ones without rows", async () => {
+        const result = await service.getLeakHistory(tenantId, {accountId, days: 7});
+
+        expect(result.periods.length).toBe(4);
+        expect(result.periods[0].until).toBe("2026-11-19");
+        expect(result.periods[0].since).toBe("2026-11-13");
+        expect(result.periods[3].since).toBe("2026-10-23");
+        expect(result.periods.every((period) => period.transition === null)).toBe(true);
+        expect(result.stages.every((stage) => stage.values.length === 4)).toBe(true);
+        expect(result.stages.every((stage) => stage.values.every((value) => value === null))).toBe(true);
+    });
+
+    it("returns an empty leak history with a note for an account that never synced", async () => {
+        const result = await service.getLeakHistory(tenantId, {accountId: emptyAccountId, since: SINCE, until: UNTIL});
+
+        expect(result.periods).toEqual([]);
+        expect(result.stages.every((stage) => stage.values.length === 0)).toBe(true);
+        expect(result.sample.eligible).toBe(false);
+        expect(result.note).toBe("Belum ada data insight untuk membangun riwayat kebocoran.");
     });
 
     it("serves the funnel route for the authenticated tenant", async () => {
@@ -373,6 +474,19 @@ describe("Analytics funnel", () => {
         expect(response.status).toBe(200);
         const body = await response.json() as {impactCaption: string};
         expect(body.impactCaption).toBe("≈45 chat hilang");
+    });
+
+    it("serves the leak history route", async () => {
+        const token = await new JwtUtil().register({id: "user-funnel", tenant: tenantId, role: "ADMIN"});
+        const response = await app.handle(new Request(
+            `http://localhost/api/analytics/leaks/history?accountId=${accountId}&since=${SINCE}&until=${UNTIL}`,
+            {headers: {authorization: `Bearer ${token.key}`}}
+        ));
+
+        expect(response.status).toBe(200);
+        const body = await response.json() as {periods: unknown[]; stages: unknown[]};
+        expect(body.periods.length).toBe(2);
+        expect(body.stages.length).toBe(7);
     });
 
     it("serves the stage-detail route", async () => {

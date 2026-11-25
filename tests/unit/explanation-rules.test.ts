@@ -79,7 +79,7 @@ describe("explanation rules", () => {
     it("keeps every fallback digit-free so a rejected template still carries the block's numbers", () => {
         const contexts = Object.keys(EXPLANATION_CONTEXTS) as (keyof typeof EXPLANATION_CONTEXTS)[];
 
-        expect(contexts.length).toBe(13);
+        expect(contexts.length).toBe(14);
         for (const context of contexts) {
             expect(EXPLANATION_CONTEXTS[context].fallback).not.toMatch(/\d/);
             const down = EXPLANATION_CONTEXTS[context].fallbackDown;

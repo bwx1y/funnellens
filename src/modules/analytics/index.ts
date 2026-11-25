@@ -46,3 +46,11 @@ export const AnalyticsController = new Elysia({
                 summary: "Get the weakest eligible funnel transition"
             }
         })
+    .get("/leaks/history",
+        async ({user, query, analyticsService}) => analyticsService.getLeakHistory(user.tenantId, query),
+        {
+            query: AnalyticsSchema.leakHistory,
+            detail: {
+                summary: "Get the weakest transition of each of the last four periods"
+            }
+        })

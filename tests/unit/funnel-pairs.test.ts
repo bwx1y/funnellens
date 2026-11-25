@@ -4,10 +4,13 @@ import {
     leakageCaption,
     pairStatus,
     pickLeakage,
+    pickPriorityStage,
     stageChannel,
     trackingStateOf,
     type FunnelPair,
+    type FunnelStageKey,
 } from "@shared/funnel";
+import {direction} from "@shared/numbers";
 
 const RATIO_NOTE = "Rasio tidak tersedia karena salah satu periode tidak memiliki angka pada tahap sebelumnya.";
 const GATE_NOTE = "Gerbang sampel belum terpenuhi sehingga perbandingan belum dapat diandalkan.";
@@ -19,6 +22,7 @@ function pairWith(deltaPp: number, eligible = true): FunnelPair {
         rate: 0.2,
         baseline: 0.2 - deltaPp / 100,
         deltaPp,
+        direction: direction(deltaPp),
         estimatedGap: 10,
         status: pairStatus(deltaPp),
         eligible,
@@ -126,6 +130,55 @@ describe("pickLeakage", () => {
 
     it("returns null for an empty list", () => {
         expect(pickLeakage([])).toBeNull();
+    });
+});
+
+describe("pickPriorityStage", () => {
+    function pair(from: FunnelStageKey, to: FunnelStageKey, deltaPp: number | null, eligible = true): FunnelPair {
+        return {
+            from,
+            to,
+            rate: 0.2,
+            baseline: 0.2,
+            deltaPp,
+            direction: direction(deltaPp),
+            estimatedGap: 10,
+            status: pairStatus(deltaPp),
+            eligible,
+            sample: {n: 180, denominator: 900, eligible, gate: "≥ 100 per periode"},
+        };
+    }
+
+    it("returns the transition with the largest eligible drop", () => {
+        const priority = pickPriorityStage([
+            pair("impressions", "link_clicks", -2),
+            pair("link_clicks", "messaging_started", -12),
+            pair("messaging_started", "observed", -8),
+        ]);
+
+        expect(priority).toEqual({from: "link_clicks", to: "messaging_started", deltaPp: -12});
+    });
+
+    it("breaks a tie towards the deeper stage", () => {
+        const priority = pickPriorityStage([
+            pair("impressions", "link_clicks", -6),
+            pair("observed", "replied", -6),
+            pair("link_clicks", "messaging_started", -6),
+        ]);
+
+        expect(priority).toEqual({from: "observed", to: "replied", deltaPp: -6});
+    });
+
+    it("ignores ineligible pairs, null deltas, and rising transitions", () => {
+        expect(pickPriorityStage([
+            pair("impressions", "link_clicks", -30, false),
+            pair("link_clicks", "messaging_started", null),
+            pair("messaging_started", "observed", 4),
+        ])).toBeNull();
+    });
+
+    it("returns null for an empty funnel", () => {
+        expect(pickPriorityStage([])).toBeNull();
     });
 });
 

@@ -236,12 +236,15 @@ describe("Analytics summary", () => {
         const result = await service.getSummary(tenantId, {accountId, since: SINCE, until: UNTIL});
 
         expect(Object.keys(result.cards).sort()).toEqual(
-            ["cplQualified", "funnelHealth", "leads", "roas", "spend"]
+            ["clicks", "cplQualified", "funnelHealth", "leads", "roas", "spend"]
         );
         expect(result.cards.spend.value).toBe(150000);
         expect(result.cards.spend.deltaPct).toBe(87.5);
         expect(result.cards.leads.value).toBe(7);
         expect(result.cards.leads.deltaPct).toBe(75);
+        expect(result.cards.clicks.value).toBe(40);
+        expect(result.cards.clicks.deltaPct).toBe(100);
+        expect(result.cards.clicks.sparkline?.length).toBe(7);
         expect(result.cards.cplQualified.value).toBe(150000);
         expect(result.cards.roas.value).toBe(2);
         expect(result.cards.funnelHealth.value).toBe(70);
@@ -272,11 +275,11 @@ describe("Analytics summary", () => {
         expect(result.cards.cplQualified.sparkline).toContain(null);
 
         expect(result.series.current).toEqual([
-            {date: "2026-03-01", spendMinor: 100000, leads: 5},
-            {date: "2026-03-02", spendMinor: 50000, leads: 2},
+            {date: "2026-03-01", spendMinor: 100000, leads: 5, clicks: 40},
+            {date: "2026-03-02", spendMinor: 50000, leads: 2, clicks: 0},
         ]);
         expect(result.series.previous).toEqual([
-            {date: "2026-02-20", spendMinor: 80000, leads: 4},
+            {date: "2026-02-20", spendMinor: 80000, leads: 4, clicks: 20},
         ]);
 
         expect(result.unrepliedHotLeads.length).toBe(1);

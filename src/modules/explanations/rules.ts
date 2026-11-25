@@ -3,12 +3,13 @@ import {round2} from "@shared/numbers";
 import {EXPLANATION_CONTEXTS} from "@/modules/explanations/contexts";
 
 /**
- * The 13 narrative contexts of an insight block. One context = one sentence shape = one fallback
+ * The 14 narrative contexts of an insight block. One context = one sentence shape = one fallback
  * template; the UI reads them by name, so the union is the contract.
  */
 export type ExplanationContext =
     | "summary"
     | "funnel_leak"
+    | "funnel_stage"
     | "velocity"
     | "tracking_health"
     | "lead_detail"

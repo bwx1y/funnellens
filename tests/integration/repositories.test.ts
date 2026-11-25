@@ -182,8 +182,8 @@ describe("Database repositories", () => {
     it("getDailyTrend aggregates per day", async () => {
         const trend = await insightDailyRepo.getDailyTrend(accountId, DAY_ONE, DAY_TWO);
         expect(trend).toEqual([
-            {date: "2026-01-01", spendMinor: 170000, leads: 5, purchaseValueMinor: 300000},
-            {date: "2026-01-02", spendMinor: 200000, leads: 3, purchaseValueMinor: 0},
+            {date: "2026-01-01", spendMinor: 170000, leads: 5, linkClicks: 40, purchaseValueMinor: 300000},
+            {date: "2026-01-02", spendMinor: 200000, leads: 3, linkClicks: 0, purchaseValueMinor: 0},
         ]);
     });
 

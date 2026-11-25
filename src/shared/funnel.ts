@@ -45,6 +45,11 @@ export interface StageDefinition {
     read: (counts: FunnelCountsLike) => number;
 }
 
+/**
+ * The stage order is the contract: `wa` has 7 stages, `web` has 6. `observed` stays in `wa` because
+ * `replied` and `qualified` are measured against the leads FunnelLens saw, not against a Meta number;
+ * removing it would silently change every downstream conversion ratio.
+ */
 export const FUNNEL_STAGES: Record<FunnelObjectiveGroup, StageDefinition[]> = {
     wa: [
         {key: "impressions", label: "Tayangan", source: "meta", read: (counts) => counts.impressions},
@@ -192,6 +197,53 @@ export function pickLeakage(pairs: FunnelPair[]): FunnelPair | null {
     }
 
     return worst;
+}
+
+export interface PriorityStage {
+    from: FunnelStageKey;
+    to: FunnelStageKey;
+    deltaPp: number;
+}
+
+/** Index of `stage` inside its own channel; `-1` for an unknown key, so ties still resolve. */
+function stageDepth(stage: FunnelStageKey): number {
+    const channel = stageChannel(stage);
+    if (channel === null) return -1;
+    return FUNNEL_STAGES[channel].findIndex((definition) => definition.key === stage);
+}
+
+/**
+ * The transition the funnel page should open first: the largest eligible drop, and on a tie the
+ * deepest stage, because a drop closer to revenue costs more than the same drop near the top.
+ */
+export function pickPriorityStage(pairs: FunnelPair[]): PriorityStage | null {
+    let best: FunnelPair | null = null;
+    let bestDepth = -1;
+
+    for (const pair of pairs) {
+        if (!pair.eligible || pair.deltaPp === null || pair.deltaPp >= 0) continue;
+        if (best === null || best.deltaPp === null) {
+            best = pair;
+            bestDepth = stageDepth(pair.to);
+            continue;
+        }
+        if (pair.deltaPp < best.deltaPp) {
+            best = pair;
+            bestDepth = stageDepth(pair.to);
+            continue;
+        }
+        if (pair.deltaPp === best.deltaPp) {
+            const depth = stageDepth(pair.to);
+            if (depth > bestDepth) {
+                best = pair;
+                bestDepth = depth;
+            }
+        }
+    }
+
+    return best === null || best.deltaPp === null
+        ? null
+        : {from: best.from, to: best.to, deltaPp: best.deltaPp};
 }
 
 export function leakageCaption(estimatedGap: number): string {

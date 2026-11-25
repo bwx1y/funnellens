@@ -7,7 +7,7 @@ import {CampaignRepository} from "@db/repositories/campaign.repository";
 import {InsightAlertRepository} from "@db/repositories/insight-alert.repository";
 import {requireAccountScope} from "@db/repositories/ad-account.repository";
 import {BadRequestError} from "@shared/errors";
-import {bucketIndex, dateRange} from "@shared/dates";
+import {bucketIndex, addDays, dateRange, dayCount, endOfDayUtc, startOfDayUtc} from "@shared/dates";
 import {direction, round4, type DeltaDirection} from "@shared/numbers";
 import {isPartialDay, periodLabel, resolvePeriod} from "@shared/period";
 import {funnelHealth, type FunnelHealthResult, type HealthBadge} from "@shared/health";
@@ -18,6 +18,7 @@ import {
     buildFunnelPairs,
     leakageCaption,
     pickLeakage,
+    pickPriorityStage,
     stageChannel,
     trackingStateOf,
     type FunnelCountsLike,
@@ -26,6 +27,7 @@ import {
     type FunnelPairStatus,
     type FunnelStageKey,
     type FunnelStageSource,
+    type PriorityStage,
     type SampleBlock,
     type StageDefinition,
     type TrackingState,
@@ -33,6 +35,7 @@ import {
 
 const SPARKLINE_BUCKETS = 7;
 const HOT_LEAD_LIMIT = 5;
+const HISTORY_PERIODS = 4;
 
 /** Fill-in for the half of the counts a daily row does not carry; the stage reader picks its own field. */
 const EMPTY_FUNNEL_COUNTS: FunnelCountsLike = {
@@ -47,6 +50,41 @@ const EMPTY_FUNNEL_COUNTS: FunnelCountsLike = {
     replied: 0,
     qualified: 0,
     closed: 0,
+};
+
+/** The inspection steps a human runs when a stage drops; grouped by what is actually checked. */
+const STAGE_CHECK_GROUPS = {
+    campaign: [
+        {key: "campaign_status", label: "Periksa status campaign di Meta", route: "/app/funnel"},
+        {key: "objective_channel", label: "Bandingkan objective campaign dengan channel funnel", route: "/app/funnel"},
+    ],
+    reply: [
+        {key: "reply_speed", label: "Periksa kecepatan balas CS", route: "/app/audience"},
+        {key: "ctwa_attribution", label: "Cek atribusi CTWA pada lead baru", route: "/app/tracking"},
+    ],
+    tracking: [
+        {key: "tracking_event", label: "Periksa tracking-health event terkait", route: "/app/tracking"},
+        {key: "meta_vs_order", label: "Bandingkan event Meta dengan pesanan tercatat", route: "/app/tracking"},
+    ],
+    closing: [
+        {key: "qualified_without_close", label: "Tinjau lead qualified tanpa closing", route: "/app/audience"},
+        {key: "deal_value", label: "Periksa nilai deal yang belum tercatat", route: "/app/audience"},
+    ],
+};
+
+/** Static per-stage inspection steps; `done` is always `false` because the server records no manual work. */
+const STAGE_CHECKS: Record<FunnelStageKey, {key: string; label: string; route: string | null}[]> = {
+    impressions: STAGE_CHECK_GROUPS.campaign,
+    link_clicks: STAGE_CHECK_GROUPS.campaign,
+    messaging_started: STAGE_CHECK_GROUPS.reply,
+    observed: STAGE_CHECK_GROUPS.reply,
+    replied: STAGE_CHECK_GROUPS.reply,
+    lpv: STAGE_CHECK_GROUPS.tracking,
+    view_content: STAGE_CHECK_GROUPS.tracking,
+    add_to_cart: STAGE_CHECK_GROUPS.tracking,
+    purchase: STAGE_CHECK_GROUPS.tracking,
+    qualified: STAGE_CHECK_GROUPS.closing,
+    closed: STAGE_CHECK_GROUPS.closing,
 };
 
 export interface SummaryQuery {
@@ -85,14 +123,15 @@ export interface SummaryResponse {
     cards: {
         spend: KpiCard;
         leads: KpiCard;
+        clicks: KpiCard;
         cplQualified: KpiCard;
         roas: KpiCard;
         funnelHealth: KpiCard & {badge: HealthBadge | null};
     };
     health: FunnelHealthResult;
     series: {
-        current: {date: string; spendMinor: number; leads: number}[];
-        previous: {date: string; spendMinor: number; leads: number}[];
+        current: {date: string; spendMinor: number; leads: number; clicks: number}[];
+        previous: {date: string; spendMinor: number; leads: number; clicks: number}[];
     };
     unrepliedHotLeads: {
         leadId: number;
@@ -140,20 +179,39 @@ export interface FunnelStageView {
     key: FunnelStageKey;
     label: string;
     value: number;
+    /** Same stage in the previous period; `0` when that period had none. */
+    previousValue: number;
+    changeCount: number;
     source: FunnelStageSource;
     estimated?: true;
     /** Nilai tahap dibagi tayangan pada periode berjalan; bukan pembanding lintas periode. */
     rateFromFirst: number | null;
+    /** `value / stages[0].value`, 4 decimals; `null` when the first stage is 0. */
+    share: number | null;
 }
 
 export interface FunnelResponse {
     objectiveGroup: FunnelObjectiveGroup;
+    stageCount: number;
+    stageKeys: FunnelStageKey[];
     period: {since: string; until: string; days: number; label: string; isPartial: boolean};
     previousPeriod: {since: string; until: string; label: string};
     stages: FunnelStageView[];
     pairs: FunnelPair[];
+    /** The drop the funnel page should open first; `null` when nothing eligible dropped. */
+    priorityStage: PriorityStage | null;
     sample: SampleBlock;
     note?: string;
+}
+
+export interface LeakageCampaignRow {
+    campaignId: string;
+    name: string;
+    rate: number | null;
+    baseline: number | null;
+    deltaPp: number | null;
+    estimatedGap: number | null;
+    eligible: boolean;
 }
 
 export interface LeakageResponse {
@@ -167,7 +225,37 @@ export interface LeakageResponse {
     impactMinor: null;
     impactCaption: string | null;
     note: string | null;
+    campaigns: LeakageCampaignRow[];
     explanation: ExplanationRef | null;
+}
+
+export interface LeakHistoryQuery {
+    accountId: string;
+    since?: string;
+    until?: string;
+    days?: number;
+    objectiveGroup?: FunnelObjectiveGroup;
+}
+
+export interface LeakHistoryPeriod {
+    since: string;
+    until: string;
+    label: string;
+    transition: string | null;
+    rate: number | null;
+    baseline: number | null;
+    deltaPp: number | null;
+    estimatedGap: number | null;
+    severity: "WARNING" | "CRITICAL" | null;
+}
+
+export interface LeakHistoryResponse {
+    objectiveGroup: FunnelObjectiveGroup;
+    /** Newest first; at most four consecutive windows. */
+    periods: LeakHistoryPeriod[];
+    stages: {key: FunnelStageKey; label: string; values: (number | null)[]}[];
+    sample: SampleBlock;
+    note?: string;
 }
 
 export interface StageComparisonRow {
@@ -181,6 +269,21 @@ export interface StageComparisonRow {
     status: FunnelPairStatus;
 }
 
+export interface StageHistoryPoint {
+    since: string;
+    until: string;
+    label: string;
+    value: number | null;
+}
+
+export interface StageCheck {
+    key: string;
+    label: string;
+    /** Manual step: the server never claims it was performed. */
+    done: false;
+    route: string | null;
+}
+
 export interface StageDetailResponse {
     stageKey: FunnelStageKey;
     label: string;
@@ -189,6 +292,9 @@ export interface StageDetailResponse {
     previousPeriod: {since: string; until: string; label: string};
     daily: {date: string; value: number}[];
     comparisonTable: StageComparisonRow[];
+    history: StageHistoryPoint[];
+    explanation: ExplanationRef | null;
+    checks: StageCheck[];
     sample: SampleBlock;
     note?: string;
 }
@@ -254,6 +360,7 @@ export class AnalyticsService {
 
         const spendByBucket = new Array<number>(SPARKLINE_BUCKETS).fill(0);
         const leadsByBucket = new Array<number>(SPARKLINE_BUCKETS).fill(0);
+        const clicksByBucket = new Array<number>(SPARKLINE_BUCKETS).fill(0);
         const purchaseByBucket = new Array<number>(SPARKLINE_BUCKETS).fill(0);
         const qualifiedByBucket = new Array<number>(SPARKLINE_BUCKETS).fill(0);
 
@@ -261,6 +368,7 @@ export class AnalyticsService {
             const index = bucket(point.date);
             spendByBucket[index] += point.spendMinor;
             leadsByBucket[index] += point.leads;
+            clicksByBucket[index] += point.linkClicks;
             purchaseByBucket[index] += point.purchaseValueMinor;
         }
         for (const point of dailyLeads) {
@@ -297,6 +405,17 @@ export class AnalyticsService {
         };
         if (leadsDelta === null) {
             leadsCard.note = "Perbandingan tidak tersedia karena periode sebelumnya tanpa lead.";
+        }
+
+        const clicksDelta = percentChange(current.linkClicks, previous.linkClicks);
+        const clicksCard: KpiCard = {
+            value: current.linkClicks,
+            deltaPct: clicksDelta,
+            direction: direction(clicksDelta),
+            sparkline: clicksByBucket,
+        };
+        if (clicksDelta === null) {
+            clicksCard.note = "Perbandingan tidak tersedia karena periode sebelumnya tanpa klik tautan.";
         }
 
         const cplQualified = qualified > 0 ? Math.round(current.spendMinor / qualified) : null;
@@ -429,6 +548,7 @@ export class AnalyticsService {
             cards: {
                 spend: spendCard,
                 leads: leadsCard,
+                clicks: clicksCard,
                 cplQualified: cplCard,
                 roas: roasCard,
                 funnelHealth: funnelCard,
@@ -476,19 +596,25 @@ export class AnalyticsService {
         const impressions = funnel.stages[0].value;
         const stages: FunnelStageView[] = FUNNEL_STAGES[objectiveGroup].map((definition, index) => {
             const value = funnel.stages[index].value;
+            const previousValue = funnel.previousStages[index].value;
 
             return {
                 key: definition.key,
                 label: definition.label,
                 value,
+                previousValue,
+                changeCount: value - previousValue,
                 source: definition.source,
                 ...(definition.estimated === true ? {estimated: true as const} : {}),
                 rateFromFirst: impressions > 0 ? round4(value / impressions) : null,
+                share: impressions > 0 ? round4(value / impressions) : null,
             };
         });
 
         const response: FunnelResponse = {
             objectiveGroup,
+            stageCount: stages.length,
+            stageKeys: stages.map((stage) => stage.key),
             period: {
                 since: period.since,
                 until: period.until,
@@ -503,6 +629,7 @@ export class AnalyticsService {
             },
             stages,
             pairs: funnel.pairs,
+            priorityStage: pickPriorityStage(funnel.pairs),
             sample: funnel.sample,
         };
 
@@ -543,9 +670,21 @@ export class AnalyticsService {
                 note: funnel.pairs.some((pair) => pair.eligible)
                     ? "Tidak ada transisi yang menurun pada periode ini."
                     : "Cakupan belum cukup untuk membandingkan konversi.",
+                campaigns: [],
                 explanation: null,
             };
         }
+
+        const campaigns = await this.leakageCampaigns({
+            accountId: query.accountId,
+            from: leak.from,
+            to: leak.to,
+            start: period.start,
+            end: period.end,
+            prevStart: period.prevStart,
+            prevEnd: period.prevEnd,
+            trackingState,
+        });
 
         const direction = leak.deltaPp === null ? undefined : leak.deltaPp < 0 ? "down" : "up";
         const explanation = await this.explanations.ensure({
@@ -572,17 +711,144 @@ export class AnalyticsService {
             baseline: leak.baseline,
             deltaPp: leak.deltaPp,
             estimatedGap: leak.estimatedGap,
-            severity: leak.deltaPp !== null && leak.deltaPp <= -15
-                ? "CRITICAL"
-                : leak.deltaPp !== null && leak.deltaPp <= -5
-                    ? "WARNING"
-                    : null,
+            severity: leakSeverity(leak.deltaPp),
             trackingState,
             impactMinor: null,
             impactCaption: leak.estimatedGap === null ? null : leakageCaption(leak.estimatedGap),
             note: null,
+            campaigns,
             explanation,
         };
+    }
+
+    /**
+     * Per-campaign view of the transition that won `pickLeakage`: the same current/previous windows,
+     * narrowed to one campaign. Sorted by the biggest drop first, unmeasured campaigns last.
+     */
+    private async leakageCampaigns(params: {
+        accountId: string;
+        from: FunnelStageKey;
+        to: FunnelStageKey;
+        start: Date;
+        end: Date;
+        prevStart: Date;
+        prevEnd: Date;
+        trackingState: TrackingState;
+    }): Promise<LeakageCampaignRow[]> {
+        const {accountId, from, to, start, end, prevStart, prevEnd, trackingState} = params;
+        const campaigns = await this.campaignRepo.findByAccountId(accountId);
+
+        const rows = await Promise.all(campaigns.map(async (campaign): Promise<LeakageCampaignRow> => {
+            const funnel = await this.loadFunnel({
+                accountId,
+                campaignId: campaign.id,
+                objectiveGroup: "wa",
+                start,
+                end,
+                prevStart,
+                prevEnd,
+                trackingState,
+            });
+            const pair = funnel.pairs.find((candidate) => candidate.from === from && candidate.to === to);
+
+            return {
+                campaignId: campaign.id,
+                name: campaign.name,
+                rate: pair?.rate ?? null,
+                baseline: pair?.baseline ?? null,
+                deltaPp: pair?.deltaPp ?? null,
+                estimatedGap: pair?.estimatedGap ?? null,
+                eligible: pair?.eligible ?? false,
+            };
+        }));
+
+        return rows.sort((left, right) => {
+            if (left.deltaPp === null && right.deltaPp === null) return left.name.localeCompare(right.name);
+            if (left.deltaPp === null) return 1;
+            if (right.deltaPp === null) return -1;
+            if (left.deltaPp !== right.deltaPp) return left.deltaPp - right.deltaPp;
+            return left.name.localeCompare(right.name);
+        });
+    }
+
+    /**
+     * The weakest transition of each of the last four consecutive windows, newest first. A window
+     * without rows reports `null` stage values instead of a fabricated zero, and the window count is
+     * capped by the days that actually have insight rows.
+     */
+    async getLeakHistory(tenantId: string, query: LeakHistoryQuery): Promise<LeakHistoryResponse> {
+        const account = await requireAccountScope(tenantId, query.accountId);
+        const objectiveGroup = query.objectiveGroup ?? "wa";
+        const period = resolvePeriod(account, query);
+        const trackingState = trackingStateOf(await this.analyticsRepo.getTrackingSummary(query.accountId));
+
+        const available = await this.availableDays(query.accountId, period.until);
+        const count = Math.min(HISTORY_PERIODS, Math.floor(available / period.days));
+        const windows = trailingWindows(period.until, period.days, count);
+
+        const snapshots = await Promise.all(windows.map(async (window) => {
+            const {counts, hasMeta, hasLeads} = await this.windowCounts({
+                accountId: query.accountId,
+                objectiveGroup,
+                since: window.since,
+                until: window.until,
+            });
+            return {window, counts, hasMeta, hasLeads};
+        }));
+
+        const definitions = FUNNEL_STAGES[objectiveGroup];
+        const periods: LeakHistoryPeriod[] = snapshots.map((snapshot, index) => {
+            const older = snapshots[index + 1];
+            const pairs = buildFunnelPairs(
+                definitions.map((definition) => ({key: definition.key, value: definition.read(snapshot.counts)})),
+                older === undefined
+                    ? []
+                    : definitions.map((definition) => ({key: definition.key, value: definition.read(older.counts)})),
+                trackingState
+            );
+            const leak = pickLeakage(pairs);
+
+            return {
+                since: snapshot.window.since,
+                until: snapshot.window.until,
+                label: periodLabel(snapshot.window.since, snapshot.window.until),
+                transition: leak === null ? null : `${leak.from}→${leak.to}`,
+                rate: leak?.rate ?? null,
+                baseline: leak?.baseline ?? null,
+                deltaPp: leak?.deltaPp ?? null,
+                estimatedGap: leak?.estimatedGap ?? null,
+                severity: leakSeverity(leak?.deltaPp ?? null),
+            };
+        });
+
+        const stages = definitions.map((definition) => ({
+            key: definition.key,
+            label: definition.label,
+            values: snapshots.map((snapshot) => {
+                const present = definition.source === "meta" ? snapshot.hasMeta : snapshot.hasLeads;
+                return present ? definition.read(snapshot.counts) : null;
+            }),
+        }));
+
+        const newest = snapshots[0];
+        const sample: SampleBlock = newest === undefined
+            ? {n: 0, denominator: 100, eligible: false, gate: "≥ 100 tayangan"}
+            : {
+                n: newest.counts.impressions,
+                denominator: 100,
+                eligible: newest.counts.impressions >= 100,
+                gate: "≥ 100 tayangan",
+            };
+
+        const response: LeakHistoryResponse = {objectiveGroup, periods, stages, sample};
+
+        if (snapshots.length === 0) {
+            response.note = "Belum ada data insight untuk membangun riwayat kebocoran.";
+        } else if (trackingState !== "up_to_date") {
+            response.note = "Status tracking belum terkini sehingga seluruh transisi ditandai belum layak dibandingkan.";
+        }
+
+        return response;
     }
 
     async getStageDetail(tenantId: string, query: StageDetailQuery): Promise<StageDetailResponse> {
@@ -634,6 +900,39 @@ export class AnalyticsService {
             };
         });
 
+        const stageIndex = FUNNEL_STAGES[objectiveGroup].findIndex((stage) => stage.key === definition.key);
+        const deltaPp = stageIndex === 0 ? null : funnel.pairs[stageIndex - 1].deltaPp ?? null;
+
+        const available = await this.availableDays(query.accountId, period.until);
+        const historyCount = Math.min(HISTORY_PERIODS, Math.floor(available / period.days));
+        const history = await this.stageHistory({
+            accountId: query.accountId,
+            objectiveGroup,
+            definition,
+            until: period.until,
+            days: period.days,
+            count: historyCount,
+        });
+
+        const explanation = await this.explanations.ensure({
+            tenantId,
+            accountId: query.accountId,
+            context: "funnel_stage",
+            entityType: "stage",
+            entityId: definition.key,
+            filter: {since: period.since, until: period.until},
+            snapshotId: `${period.since}..${period.until}`,
+            facts: {
+                stage: definition.label,
+                current: formatNumber(funnel.stages[stageIndex].value),
+                previous: formatNumber(funnel.previousStages[stageIndex].value),
+                rate: formatPercent(stageIndex === 0 ? null : funnel.pairs[stageIndex - 1].rate),
+                deltaPp: deltaPp === null ? "belum terukur" : `${formatNumber(deltaPp)} pp`,
+                ...(deltaPp === null ? {} : {__direction: deltaPp < 0 ? "down" as const : "up" as const}),
+            },
+            evidenceIds: [],
+        });
+
         const response: StageDetailResponse = {
             stageKey: definition.key,
             label: definition.label,
@@ -652,6 +951,9 @@ export class AnalyticsService {
             },
             daily,
             comparisonTable,
+            history,
+            explanation,
+            checks: STAGE_CHECKS[definition.key].map((check) => ({...check, done: false as const})),
             sample: funnel.sample,
         };
 
@@ -726,6 +1028,84 @@ export class AnalyticsService {
         };
     }
 
+    /** Days covered by insight rows up to `until`; `0` when the account never synced. */
+    private async availableDays(accountId: string, until: string): Promise<number> {
+        const oldest = await this.insightDailyRepo.getOldestInsightDate(accountId);
+        return oldest === null ? 0 : Math.max(0, dayCount(oldest, until));
+    }
+
+    /**
+     * Sums one window from the daily readers instead of the totals reader: the row count is what
+     * separates "no data" from a real zero, and the totals reader collapses both to `0`.
+     */
+    private async windowCounts(params: {
+        accountId: string;
+        objectiveGroup: FunnelObjectiveGroup;
+        since: string;
+        until: string;
+    }): Promise<{counts: FunnelCountsLike; hasMeta: boolean; hasLeads: boolean}> {
+        const {accountId, objectiveGroup, since, until} = params;
+        const start = startOfDayUtc(since);
+        const end = endOfDayUtc(until);
+
+        const [metaRows, leadRows] = await Promise.all([
+            this.analyticsRepo.getDailyMetaStages(accountId, start, end, objectiveGroup),
+            this.analyticsRepo.getDailyLeadStages(accountId, start, end),
+        ]);
+
+        const counts: FunnelCountsLike = {...EMPTY_FUNNEL_COUNTS};
+        for (const row of metaRows) {
+            counts.impressions += row.impressions;
+            counts.linkClicks += row.linkClicks;
+            counts.messagingStarted += row.messagingStarted;
+            counts.lpv += row.lpv;
+            counts.viewContent += row.viewContent;
+            counts.addToCart += row.addToCart;
+            counts.purchase += row.purchase;
+        }
+        for (const row of leadRows) {
+            counts.observed += row.observed;
+            counts.replied += row.replied;
+            counts.qualified += row.qualified;
+            counts.closed += row.closed;
+        }
+
+        return {counts, hasMeta: metaRows.length > 0, hasLeads: leadRows.length > 0};
+    }
+
+    /** One value per trailing window, newest first; a window without rows stays `null`. */
+    private async stageHistory(params: {
+        accountId: string;
+        objectiveGroup: FunnelObjectiveGroup;
+        definition: StageDefinition;
+        until: string;
+        days: number;
+        count: number;
+    }): Promise<StageHistoryPoint[]> {
+        const {accountId, objectiveGroup, definition, until, days, count} = params;
+        const windows = trailingWindows(until, days, count);
+
+        return Promise.all(windows.map(async (window) => {
+            const byDate = await this.dailyStageByDate({
+                accountId,
+                start: startOfDayUtc(window.since),
+                end: endOfDayUtc(window.until),
+                objectiveGroup,
+                definition,
+            });
+            const value = byDate.size === 0
+                ? null
+                : [...byDate.values()].reduce((sum, entry) => sum + entry, 0);
+
+            return {
+                since: window.since,
+                until: window.until,
+                label: periodLabel(window.since, window.until),
+                value,
+            };
+        }));
+    }
+
     /**
      * Zero-fills nothing: only dates with rows are returned, the caller fills the gaps. The stage
      * reader is reused so the daily series and the funnel totals agree by construction.
@@ -767,12 +1147,33 @@ export class AnalyticsService {
 
 }
 
-function toSeriesPoint(point: {date: string; spendMinor: number; leads: number}): {
+function toSeriesPoint(point: {date: string; spendMinor: number; leads: number; linkClicks: number}): {
     date: string;
     spendMinor: number;
     leads: number;
+    clicks: number;
 } {
-    return {date: point.date, spendMinor: point.spendMinor, leads: point.leads};
+    return {date: point.date, spendMinor: point.spendMinor, leads: point.leads, clicks: point.linkClicks};
+}
+
+interface TrailingWindow {
+    since: string;
+    until: string;
+}
+
+/** Consecutive `days`-long windows ending at `until`, newest first. */
+function trailingWindows(until: string, days: number, count: number): TrailingWindow[] {
+    return Array.from({length: Math.max(0, count)}, (_, index) => ({
+        since: addDays(until, -(index + 1) * days + 1),
+        until: addDays(until, -index * days),
+    }));
+}
+
+function leakSeverity(deltaPp: number | null): "WARNING" | "CRITICAL" | null {
+    if (deltaPp === null) return null;
+    if (deltaPp <= -15) return "CRITICAL";
+    if (deltaPp <= -5) return "WARNING";
+    return null;
 }
 
 /** Percent change rounded to 2 decimals; `null` when the previous value is 0 (no usable baseline). */

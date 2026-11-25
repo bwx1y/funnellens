@@ -57,6 +57,24 @@ export const AnalyticsSchema = {
         })),
         days: daysParam,
     }),
+    leakHistory: t.Object({
+        accountId: t.String({
+            description: "Meta Ad Account ID",
+        }),
+        since: t.Optional(t.String({
+            pattern: "^\\d{4}-\\d{2}-\\d{2}$",
+            description: "Start date (YYYY-MM-DD), defaults to 29 days before until",
+        })),
+        until: t.Optional(t.String({
+            pattern: "^\\d{4}-\\d{2}-\\d{2}$",
+            description: "End date (YYYY-MM-DD), defaults to today in the account timezone",
+        })),
+        days: daysParam,
+        objectiveGroup: t.Optional(t.Union([t.Literal("wa"), t.Literal("web")], {
+            default: "wa",
+            description: "Funnel channel: WhatsApp or Website",
+        })),
+    }),
     stageDetail: t.Object({
         accountId: t.String({
             description: "Meta Ad Account ID",

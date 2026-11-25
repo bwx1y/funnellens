@@ -32,6 +32,7 @@ export interface DailyTrendPoint {
     date: string;
     spendMinor: number;
     leads: number;
+    linkClicks: number;
     purchaseValueMinor: number;
 }
 
@@ -63,6 +64,7 @@ interface DailyTrendRow {
     date: string;
     spend_minor: string;
     leads: string;
+    link_clicks: string;
     purchase_value_minor: string;
 }
 
@@ -137,6 +139,7 @@ export class AdInsightDailyRepository extends DatabaseRepository {
             select i.date::text                       as date,
                    coalesce(sum(i.spend_minor), 0)    as spend_minor,
                    coalesce(sum(i.leads), 0)          as leads,
+                   coalesce(sum(i.inline_link_clicks), 0) as link_clicks,
                    coalesce(sum(i.purchase_value_minor), 0) as purchase_value_minor
             from ad_insight_metrics i
             where ${this.scopeFilter(accountId, since, until, campaignId)}
@@ -148,8 +151,22 @@ export class AdInsightDailyRepository extends DatabaseRepository {
             date: row.date,
             spendMinor: Number(row.spend_minor),
             leads: Number(row.leads),
+            linkClicks: Number(row.link_clicks),
             purchaseValueMinor: Number(row.purchase_value_minor),
         }));
+    }
+
+    /** Oldest insight row for the account; `null` when nothing was ever synced. */
+    async getOldestInsightDate(accountId: string): Promise<string | null> {
+        const rows = await this.database.execute(sql`
+            select min(i.date)::text as oldest
+            from ad_insight_metrics i
+            where i.account_id = ${accountId}
+              and i.level = 'ad'
+              and i.attribution_window = ${ATTRIBUTION_WINDOW}
+        `) as unknown as {oldest: string | null}[];
+
+        return rows[0]?.oldest ?? null;
     }
 
     async getCampaignPerformance(
