@@ -1,6 +1,8 @@
 import {t, type UnwrapSchema} from "elysia";
 
-const daysParam = t.Optional(t.Union([t.Literal(7), t.Literal(14), t.Literal(30)], {
+// Query values arrive as strings; `t.Numeric` coerces them so `days=7` passes and `resolvePeriod`
+// owns the 7/14/30 check (`400 INVALID_DAYS`) instead of a schema union rejecting every value.
+const daysParam = t.Optional(t.Numeric({
     description: "Period duration in days (7, 14, 30)",
 }));
 

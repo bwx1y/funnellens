@@ -10,7 +10,7 @@ const until = t.Optional(t.String({
     description: "End date (YYYY-MM-DD), defaults to today in the account timezone",
 }));
 
-const days = t.Optional(t.Union([t.Literal(7), t.Literal(14), t.Literal(30)], {
+const days = t.Optional(t.Numeric({
     description: "Period duration in days (7, 14, 30)",
 }));
 

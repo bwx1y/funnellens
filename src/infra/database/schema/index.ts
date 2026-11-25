@@ -16,6 +16,7 @@ export * from "./ads/ad-set.entity";
 export * from "./ads/campaign.entity";
 export * from "./ads/creative-tag.entity";
 export * from "./ads/explanation.entity";
+export * from "./ads/export-audit.entity";
 export * from "./ads/insight-alert.entity";
 export * from "./ads/insight-sync-staging.entity";
 export * from "./ads/meta-connection.entity";

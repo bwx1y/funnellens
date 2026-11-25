@@ -36,6 +36,17 @@ export interface DailyTrendPoint {
     purchaseValueMinor: number;
 }
 
+export interface CampaignChannelPerformance {
+    campaignId: string;
+    campaignName: string;
+    objectiveGroup: "wa" | "web";
+    spendMinor: number;
+    impressions: number;
+    linkClicks: number;
+    leads: number;
+    purchases: number;
+}
+
 export interface CampaignPerformance {
     campaignId: string;
     campaignName: string;
@@ -153,6 +164,54 @@ export class AdInsightDailyRepository extends DatabaseRepository {
             leads: Number(row.leads),
             linkClicks: Number(row.link_clicks),
             purchaseValueMinor: Number(row.purchase_value_minor),
+        }));
+    }
+
+    /**
+     * One row per campaign, matching `getCampaignPerformance` exactly on spend and leads, plus the
+     * channel its ad sets target. A campaign that runs both channels is reported as WhatsApp: the
+     * CSV keeps one row per campaign so its numbers stay comparable with the summary table.
+     */
+    async getCampaignChannelPerformance(
+        accountId: string,
+        since: Date,
+        until: Date,
+        campaignId?: string
+    ): Promise<CampaignChannelPerformance[]> {
+        const rows = await this.database.execute(sql`
+            select i.campaign_id                            as campaign_id,
+                   c.name                                   as campaign_name,
+                   bool_or(i.objective_group = 'wa')         as has_wa,
+                   coalesce(sum(i.spend_minor), 0)           as spend_minor,
+                   coalesce(sum(i.impressions), 0)           as impressions,
+                   coalesce(sum(i.inline_link_clicks), 0)    as link_clicks,
+                   coalesce(sum(i.leads), 0)                 as leads,
+                   coalesce(sum(i.purchases), 0)             as purchases
+            from ad_insight_metrics i
+            join campaigns c on c.id = i.campaign_id
+            where ${this.scopeFilter(accountId, since, until, campaignId)}
+            group by i.campaign_id, c.name
+            order by c.name asc
+        `) as unknown as {
+            campaign_id: string;
+            campaign_name: string;
+            has_wa: boolean;
+            spend_minor: string;
+            impressions: string;
+            link_clicks: string;
+            leads: string;
+            purchases: string;
+        }[];
+
+        return rows.map((row) => ({
+            campaignId: row.campaign_id,
+            campaignName: row.campaign_name,
+            objectiveGroup: row.has_wa ? "wa" : "web",
+            spendMinor: Number(row.spend_minor),
+            impressions: Number(row.impressions),
+            linkClicks: Number(row.link_clicks),
+            leads: Number(row.leads),
+            purchases: Number(row.purchases),
         }));
     }
 

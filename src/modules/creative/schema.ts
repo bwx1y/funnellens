@@ -10,7 +10,7 @@ const until = t.Optional(t.String({
     description: "End date (YYYY-MM-DD), defaults to today in the account timezone",
 }));
 
-const days = t.Optional(t.Union([t.Literal(7), t.Literal(14), t.Literal(30)], {
+const days = t.Optional(t.Numeric({
     description: "Period duration in days (7, 14, 30)",
 }));
 
@@ -50,6 +50,21 @@ export const CreativeSchema = {
         since,
         until,
         days,
+    }),
+    trend: t.Object({
+        accountId,
+        metric: t.Union([
+            t.Literal("impressions"),
+            t.Literal("clicks"),
+            t.Literal("ctr"),
+            t.Literal("spend"),
+        ], {description: "Metric plotted per day"}),
+        since,
+        until,
+        days,
+        creativeId: t.Optional(t.String({
+            description: "Optional creative filter; without it every creative of the account is summed",
+        })),
     }),
     experiments: t.Object({
         accountId,

@@ -99,6 +99,46 @@ export interface ComparisonQuery {
     creativeIds: string[];
 }
 
+export type CreativeTrendMetric = "impressions" | "clicks" | "ctr" | "spend";
+
+export interface CreativeTrendQuery {
+    accountId: string;
+    metric: CreativeTrendMetric;
+    since?: string;
+    until?: string;
+    days?: number;
+    creativeId?: string;
+}
+
+/** One day of the trend. Every counter is `null` when the day has no insight row. */
+export interface CreativeTrendDay {
+    date: string;
+    impressions: number | null;
+    clicks: number | null;
+    ctr: number | null;
+    spendMinor: number | null;
+}
+
+export interface CreativeTrendSeries {
+    creativeId: string | null;
+    period: {since: string; until: string; days: number; label: string; isPartial: boolean};
+    previousPeriod: {since: string; until: string; label: string};
+    current: CreativeTrendDay[];
+    previous: CreativeTrendDay[];
+}
+
+export interface CreativeTrendResponse {
+    metric: CreativeTrendMetric;
+    creativeId: string | null;
+    period: {since: string; until: string; days: number; label: string; isPartial: boolean};
+    previousPeriod: {since: string; until: string; label: string};
+    current: {date: string; value: number | null}[];
+    previous: {date: string; value: number | null}[];
+    total: {current: number; previous: number; deltaPct: number | null};
+    sample: SampleBlock;
+    note?: string;
+}
+
 export interface TagCreateBody {
     tagType: TagType;
     tagValue: string;
@@ -895,6 +935,141 @@ export class CreativeService {
 
         if (notes.length > 0) response.note = notes.join(" ");
         return response;
+    }
+
+    /**
+     * Day-by-day counters for the selected period and the one before it, one entry per calendar day.
+     * Days without insight rows keep `null` so the chart shows a gap, never a fabricated zero. The CSV
+     * export reads this same series, which is what keeps the file and the JSON identical.
+     */
+    async getTrendSeries(tenantId: string, query: CreativeTrendQuery): Promise<CreativeTrendSeries> {
+        const account = await requireAccountScope(tenantId, query.accountId);
+        const period = resolvePeriod(account, query);
+
+        const [currentSeries, previousSeries] = await Promise.all([
+            this.analyticsRepo.getCreativeDailySeries(query.accountId, period.start, period.end),
+            this.analyticsRepo.getCreativeDailySeries(query.accountId, period.prevStart, period.prevEnd),
+        ]);
+
+        const toDays = (
+            series: {creativeId: string; points: CreativeDailyPoint[]}[],
+            dates: string[]
+        ): CreativeTrendDay[] => {
+            const byDate = new Map<string, CreativeTrendDay>();
+            for (const entry of series) {
+                if (query.creativeId !== undefined && entry.creativeId !== query.creativeId) continue;
+                for (const point of entry.points) {
+                    const day = byDate.get(point.date) ?? {
+                        date: point.date,
+                        impressions: 0,
+                        clicks: 0,
+                        ctr: null,
+                        spendMinor: 0,
+                    };
+                    day.impressions = (day.impressions ?? 0) + point.impressions;
+                    day.clicks = (day.clicks ?? 0) + point.clicks;
+                    day.spendMinor = (day.spendMinor ?? 0) + point.spendMinor;
+                    byDate.set(point.date, day);
+                }
+            }
+
+            return dates.map((date) => {
+                const day = byDate.get(date);
+                if (day === undefined) {
+                    return {date, impressions: null, clicks: null, ctr: null, spendMinor: null};
+                }
+
+                return {...day, ctr: ratioOrNull(day.clicks ?? 0, day.impressions ?? 0, false)};
+            });
+        };
+
+        return {
+            creativeId: query.creativeId ?? null,
+            period: periodBlock(period, account.timezoneName),
+            previousPeriod: {
+                since: period.previousSince,
+                until: period.previousUntil,
+                label: periodLabel(period.previousSince, period.previousUntil),
+            },
+            current: toDays(currentSeries, dateRange(period.since, period.until)),
+            previous: toDays(previousSeries, dateRange(period.previousSince, period.previousUntil)),
+        };
+    }
+
+    /** The selected metric over the same two windows; totals use the summed counters, not day means. */
+    async getTrend(tenantId: string, query: CreativeTrendQuery): Promise<CreativeTrendResponse> {
+        const series = await this.getTrendSeries(tenantId, query);
+
+        const valueOf = (day: CreativeTrendDay): number | null => {
+            switch (query.metric) {
+                case "impressions":
+                    return day.impressions;
+                case "clicks":
+                    return day.clicks;
+                case "ctr":
+                    return day.ctr;
+                case "spend":
+                    return day.spendMinor;
+            }
+        };
+
+        const totalOf = (days: CreativeTrendDay[]): number => {
+            const impressions = days.reduce((sum, day) => sum + (day.impressions ?? 0), 0);
+            const clicks = days.reduce((sum, day) => sum + (day.clicks ?? 0), 0);
+
+            switch (query.metric) {
+                case "impressions":
+                    return impressions;
+                case "clicks":
+                    return clicks;
+                case "spend":
+                    return days.reduce((sum, day) => sum + (day.spendMinor ?? 0), 0);
+                case "ctr":
+                    return ratioOrNull(clicks, impressions, false) ?? 0;
+            }
+        };
+
+        const currentTotal = totalOf(series.current);
+        const previousTotal = totalOf(series.previous);
+        const deltaPct = previousTotal === 0
+            ? null
+            : Math.round(((currentTotal - previousTotal) / previousTotal) * 10000) / 100;
+        const impressions = series.current.reduce((sum, day) => sum + (day.impressions ?? 0), 0);
+
+        const response: CreativeTrendResponse = {
+            metric: query.metric,
+            creativeId: series.creativeId,
+            period: series.period,
+            previousPeriod: series.previousPeriod,
+            current: series.current.map((day) => ({date: day.date, value: valueOf(day)})),
+            previous: series.previous.map((day) => ({date: day.date, value: valueOf(day)})),
+            total: {current: currentTotal, previous: previousTotal, deltaPct},
+            sample: {
+                n: impressions,
+                denominator: IMPRESSION_DENOMINATOR,
+                eligible: impressions >= IMPRESSION_DENOMINATOR,
+                gate: IMPRESSION_GATE,
+            },
+        };
+
+        const note = this.trendNote(series, query.metric, deltaPct);
+        if (note !== undefined) response.note = note;
+
+        return response;
+    }
+
+    private trendNote(series: CreativeTrendSeries, metric: CreativeTrendMetric, deltaPct: number | null): string | undefined {
+        if (series.current.every((day) => day.impressions === null)) {
+            return "Belum ada data iklan pada periode ini.";
+        }
+        if (deltaPct === null) {
+            return "Perbandingan tidak tersedia karena periode sebelumnya tanpa nilai.";
+        }
+        if (metric === "ctr" && series.current.some((day) => day.ctr === null && day.impressions !== null)) {
+            return "Sebagian hari tanpa tayangan sehingga CTR hari itu tidak terukur.";
+        }
+
+        return undefined;
     }
 
     async addTag(tenantId: string, creativeId: string, body: TagCreateBody): Promise<TagRow> {

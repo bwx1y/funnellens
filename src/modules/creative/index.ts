@@ -23,6 +23,14 @@ export const CreativeController = new Elysia({
                 summary: "Rank creatives with four gated dimensions and status"
             }
         })
+    .get("/trend",
+        async ({user, query, creativeService}) => creativeService.getTrend(user.tenantId, query),
+        {
+            query: CreativeSchema.trend,
+            detail: {
+                summary: "Get a daily creative metric against the previous period"
+            }
+        })
     .get("/fatigue",
         async ({user, query, creativeService}) => creativeService.getFatigue(user.tenantId, query),
         {
