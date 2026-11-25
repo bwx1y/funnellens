@@ -188,6 +188,49 @@ export class LeadAssessmentRepository extends DatabaseRepository {
     }
 
     /**
+     * Every level change the lead ever had, oldest first: assessment rows (applied or not) merged
+     * with the first-observation milestones. Milestones carry no confidence of their own, so they
+     * report `teramati` — the level was observed, not scored.
+     */
+    async getMovement(leadId: number): Promise<{
+        level: "COLD" | "WARM" | "HOT";
+        at: Date;
+        reason: string | null;
+        confidence: string;
+        applied: boolean;
+    }[]> {
+        const rows = await this.database.execute(sql`
+            select m.level, m.at, m.reason, m.confidence, m.applied
+            from (
+                select a.level, a.event_at as at, a.reason, a.confidence, a.applied,
+                       0 as kind, a.created_at as tie
+                from lead_assessments a
+                where a.lead_id = ${leadId}
+                union all
+                select lm.level, lm.first_at as at, null::text as reason, 'teramati' as confidence,
+                       true as applied, 1 as kind, lm.first_at as tie
+                from lead_milestones lm
+                where lm.lead_id = ${leadId}
+            ) m
+            order by m.at asc, m.kind asc, m.tie asc
+        `) as unknown as {
+            level: "COLD" | "WARM" | "HOT";
+            at: Date | string;
+            reason: string | null;
+            confidence: string;
+            applied: boolean;
+        }[];
+
+        return rows.map((row) => ({
+            level: row.level,
+            at: new Date(row.at),
+            reason: row.reason,
+            confidence: row.confidence,
+            applied: row.applied,
+        }));
+    }
+
+    /**
      * One row per lead with an applied assessment in the period cohort: the newest applied row wins.
      * The cohort itself is the page — the period bound is the only filter, so no pagination is applied.
      */

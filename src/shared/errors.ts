@@ -40,6 +40,12 @@ export class ConflictError extends AppError {
     }
 }
 
+export class UnprocessableEntityError extends AppError {
+    constructor(message: string, code?: string) {
+        super(message, 422, code)
+    }
+}
+
 export class InternalError extends AppError {
     constructor(message: string = "Internal Server Error", code?: string) {
         super(message, 500, code)

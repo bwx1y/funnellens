@@ -55,6 +55,9 @@ export const AudienceSchema = {
         since,
         until,
         days,
+        q: t.Optional(t.String({
+            description: "Case-insensitive match on name, masked phone, or assessment reason",
+        })),
     }),
     conversations: t.Object({
         accountId,
@@ -64,6 +67,12 @@ export const AudienceSchema = {
     }),
     leadList: t.Object({
         accountId,
+        since,
+        until,
+        days,
+        campaignId: t.Optional(t.String({
+            description: "Optional campaign filter for the list and the level counts",
+        })),
         temperature: t.Optional(temperature),
         stage: t.Optional(stage),
         search: t.Optional(t.String({
@@ -71,13 +80,29 @@ export const AudienceSchema = {
         })),
         page: t.Optional(t.String({
             pattern: "^[1-9]\\d*$",
-            description: "1-based page number, defaults to 1",
+            description: "1-based page number, defaults to 1 and clamped to the last page",
+        })),
+        pageSize: t.Optional(t.String({
+            description: "Page size: 5, 10, or 15 (default 10); any other value returns 422 INVALID_PAGE_SIZE",
         })),
         limit: t.Optional(t.String({
-            pattern: "^[1-9]\\d*$",
-            description: "Page size, defaults to 20 (max 100)",
+            description: "Deprecated alias of pageSize, read only when pageSize is absent",
         })),
-        sortBy: t.Optional(t.Union([t.Literal("createdAt"), t.Literal("firstSeenAt")])),
+        sortBy: t.Optional(t.Union([
+            t.Literal("createdAt"),
+            t.Literal("firstSeenAt"),
+            t.Literal("name"),
+            t.Literal("response"),
+            t.Literal("temperature"),
+            t.Literal("analysis"),
+            t.Literal("campaign"),
+        ], {
+            description: "Sort key; null values always land last",
+        })),
+        dir: t.Optional(t.Union([t.Literal("asc"), t.Literal("desc")], {
+            default: "desc",
+            description: "Sort direction, defaults to desc",
+        })),
     }),
     leadUpdate: t.Object({
         stage: t.Optional(stage),

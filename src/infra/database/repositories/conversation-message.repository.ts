@@ -1,7 +1,7 @@
 import {DatabaseRepository} from "./base.repository";
 import {ConversationMessageEntity} from "@db/schema/wa/conversation-message.entity";
 import type {ReplyType, Sentiment} from "@shared/audience";
-import {and, desc, eq, gte, lte, sql} from "drizzle-orm";
+import {and, desc, eq, gte, inArray, isNotNull, lte, sql} from "drizzle-orm";
 
 export type ConversationMessage = typeof ConversationMessageEntity.$inferSelect;
 
@@ -45,6 +45,42 @@ export class ConversationMessageRepository extends DatabaseRepository {
             .limit(limit);
 
         return rows.reverse();
+    }
+
+    /** The newest `limit` messages of one lead, still oldest-first for a transcript. */
+    async findLatest(leadId: number, limit: number): Promise<ConversationMessage[]> {
+        const rows = await this.database.select()
+            .from(ConversationMessageEntity)
+            .where(eq(ConversationMessageEntity.leadId, leadId))
+            .orderBy(desc(ConversationMessageEntity.sentAt), desc(ConversationMessageEntity.id))
+            .limit(limit);
+
+        return rows.reverse();
+    }
+
+    /** Newest non-null topic per lead: the search result shows the last thing the lead talked about. */
+    async getLatestTopics(leadIds: number[]): Promise<Map<number, string>> {
+        const byLead = new Map<number, string>();
+        if (leadIds.length === 0) return byLead;
+
+        const rows = await this.database.select({
+            leadId: ConversationMessageEntity.leadId,
+            topic: ConversationMessageEntity.topic,
+        })
+            .from(ConversationMessageEntity)
+            .where(and(
+                inArray(ConversationMessageEntity.leadId, leadIds),
+                isNotNull(ConversationMessageEntity.topic)
+            ))
+            .orderBy(ConversationMessageEntity.leadId, desc(ConversationMessageEntity.sentAt));
+
+        for (const row of rows) {
+            if (row.topic !== null && !byLead.has(row.leadId)) {
+                byLead.set(row.leadId, row.topic);
+            }
+        }
+
+        return byLead;
     }
 
     /** Inbound messages from `from` onward, oldest first: the replay range of a `reassess` job. */

@@ -127,6 +127,13 @@
       "when": 1795265245500,
       "tag": "0017_insight_metrics_view",
       "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "7",
+      "when": 1795616661560,
+      "tag": "0018_daily_avengers",
+      "breakpoints": true
     }
   ]
 }

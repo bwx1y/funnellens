@@ -3,9 +3,14 @@ import {AnalyticsRepository} from "@db/repositories/analytics.repository";
 import {CampaignRepository} from "@db/repositories/campaign.repository";
 import {ConversationMessageRepository} from "@db/repositories/conversation-message.repository";
 import {LeadAssessmentRepository} from "@db/repositories/lead-assessment.repository";
-import {LeadRepository, type Lead, type ManualLeadChanges} from "@db/repositories/lead.repository";
+import {
+    LeadRepository,
+    type Lead,
+    type LeadSortBy,
+    type ManualLeadChanges,
+} from "@db/repositories/lead.repository";
 import {requireAccountScope} from "@db/repositories/ad-account.repository";
-import {NotFoundError} from "@shared/errors";
+import {NotFoundError, UnprocessableEntityError} from "@shared/errors";
 import {safeTimeZone} from "@shared/dates";
 import {round2, round4} from "@shared/numbers";
 import {isPartialDay, periodLabel, resolvePeriod} from "@shared/period";
@@ -41,6 +46,10 @@ export interface RangeQuery {
     since?: string;
     until?: string;
     days?: number;
+}
+
+export interface PipelineQuery extends RangeQuery {
+    q?: string;
 }
 
 export interface SampleBlock {
@@ -133,8 +142,17 @@ export interface PipelineRow {
     explanation: ExplanationRef | null;
 }
 
+export interface PipelineLane {
+    level: "COLD" | "WARM" | "HOT";
+    /** Leads of this level in the period scope, regardless of `q`. */
+    count: number;
+    rows: PipelineRow[];
+}
+
 export interface PipelineResponse {
     period: {since: string; until: string; days: number; label: string; isPartial: boolean};
+    lanes: PipelineLane[];
+    /** Deprecated flat view kept for one release; `lanes` is the contract. */
     rows: PipelineRow[];
     sample: SampleBlock;
     note?: string;
@@ -156,10 +174,17 @@ export interface LeadListQuery {
     accountId: string;
     temperature?: "COLD" | "WARM" | "HOT";
     stage?: Lead["stage"];
+    campaignId?: string;
     search?: string;
     page?: string;
+    pageSize?: string;
+    /** Deprecated alias of `pageSize`; only read when `pageSize` is absent. */
     limit?: string;
-    sortBy?: "createdAt" | "firstSeenAt";
+    sortBy?: LeadSortBy;
+    dir?: "asc" | "desc";
+    since?: string;
+    until?: string;
+    days?: number;
 }
 
 export interface LeadListRow {
@@ -177,8 +202,56 @@ export interface LeadListRow {
 export interface LeadListResponse {
     data: LeadListRow[];
     page: number;
-    limit: number;
+    pageSize: number;
     total: number;
+    pages: number;
+    /** Period and campaign scope, never narrowed by `search`/`temperature`/`page`. */
+    counts: {cold: number; warm: number; hot: number; total: number};
+}
+
+export interface LeadMovementPoint {
+    level: "COLD" | "WARM" | "HOT";
+    at: string;
+    reason: string | null;
+    confidence: string;
+    applied: boolean;
+}
+
+export interface LeadTrailPoint {
+    at: string;
+    direction: "INBOUND" | "OUTBOUND";
+    body: string | null;
+    responseType: string | null;
+    gapSeconds: number | null;
+    /** Inbound message that quotes an earlier one (`context_wamid` set). */
+    isQuote: boolean;
+}
+
+export interface LeadDetailResponse {
+    id: number;
+    name: string | null;
+    phoneMasked: string | null;
+    /** Only the hash is stored, so the masked form cannot be rebuilt. */
+    emailMasked: null;
+    campaignName: string | null;
+    adName: string | null;
+    creativeName: string | null;
+    temperature: "COLD" | "WARM" | "HOT" | null;
+    stage: string;
+    sentiment: string | null;
+    dealValueMinor: number | null;
+    currency: string;
+    attribution: {method: string | null; note: string | null; confidence: string | null};
+    metrics: {
+        waitingMinutes: number | null;
+        firstReplySeconds: number | null;
+        messagesInbound: number;
+        messagesOutbound: number;
+        daysInPipeline: number | null;
+    };
+    movement: LeadMovementPoint[];
+    trail: LeadTrailPoint[];
+    explanation: ExplanationRef | null;
 }
 
 export interface LeadUpdateBody {
@@ -197,8 +270,23 @@ export interface LeadUpdateResponse {
 }
 
 const DEFAULT_PAGE = 1;
-const DEFAULT_LIMIT = 20;
-const MAX_LIMIT = 100;
+const DEFAULT_PAGE_SIZE = 10;
+const TRAIL_LIMIT = 50;
+
+/** The only page sizes the lead list accepts; anything else is a client error, not a clamp. */
+export const LEAD_PAGE_SIZES = [5, 10, 15] as const;
+
+/** Maps the legacy `limit` alias and rejects every size outside {@link LEAD_PAGE_SIZES}. */
+export function resolveLeadPageSize(value: string | undefined): number {
+    if (value === undefined) return DEFAULT_PAGE_SIZE;
+
+    const size = Number(value);
+    if (!LEAD_PAGE_SIZES.includes(size as typeof LEAD_PAGE_SIZES[number])) {
+        throw new UnprocessableEntityError("pageSize harus 5, 10, atau 15", "INVALID_PAGE_SIZE");
+    }
+
+    return size;
+}
 
 export class AudienceService {
     constructor(
@@ -514,7 +602,7 @@ export class AudienceService {
         };
     }
 
-    async getPipeline(tenantId: string, query: RangeQuery): Promise<PipelineResponse> {
+    async getPipeline(tenantId: string, query: PipelineQuery): Promise<PipelineResponse> {
         const account = await requireAccountScope(tenantId, query.accountId);
         const period = resolvePeriod(account, query);
 
@@ -562,6 +650,31 @@ export class AudienceService {
             explanation: explanationRefs[index],
         }));
 
+        // Lane counts describe the whole period cohort; `q` only hides rows, never changes a count.
+        const laneCount = new Map<string, number>();
+        for (const row of rows) {
+            laneCount.set(row.level, (laneCount.get(row.level) ?? 0) + 1);
+        }
+
+        const needle = query.q?.trim().toLowerCase() ?? "";
+        const matches = (row: PipelineRow): boolean =>
+            needle.length === 0
+            || (row.name ?? "").toLowerCase().includes(needle)
+            || (row.phoneMasked ?? "").toLowerCase().includes(needle)
+            || (row.reason ?? "").toLowerCase().includes(needle);
+
+        const byNewestFirst = (left: PipelineRow, right: PipelineRow): number =>
+            (right.firstSeenAt ?? "").localeCompare(left.firstSeenAt ?? "");
+
+        const visible = rows.filter(matches).sort(byNewestFirst);
+        const lanes: PipelineLane[] = HEATMAP_LEVELS
+            .map((level) => ({
+                level,
+                count: laneCount.get(level) ?? 0,
+                rows: visible.filter((row) => row.level === level),
+            }))
+            .filter((lane) => lane.count > 0 && lane.rows.length > 0);
+
         return {
             period: {
                 since: period.since,
@@ -570,14 +683,19 @@ export class AudienceService {
                 label: periodLabel(period.since, period.until),
                 isPartial: isPartialDay(period.until, account.timezoneName),
             },
-            rows,
+            lanes,
+            rows: visible,
             sample: {
-                n: rows.length,
+                n: visible.length,
                 denominator: SAMPLE_DENOMINATOR,
-                eligible: rows.length >= SAMPLE_DENOMINATOR,
+                eligible: visible.length >= SAMPLE_DENOMINATOR,
                 gate: SAMPLE_GATE,
             },
-            ...(rows.length === 0 ? {note: "Belum ada lead dengan assessment pada periode ini."} : {}),
+            ...(visible.length === 0
+                ? {note: needle.length === 0
+                    ? "Belum ada lead dengan assessment pada periode ini."
+                    : "Tidak ada lead yang cocok dengan pencarian pada periode ini."}
+                : {}),
         };
     }
 
@@ -683,33 +801,37 @@ export class AudienceService {
     }
 
     async listLeads(tenantId: string, query: LeadListQuery): Promise<LeadListResponse> {
-        await requireAccountScope(tenantId, query.accountId);
+        const account = await requireAccountScope(tenantId, query.accountId);
+        const period = resolvePeriod(account, query);
+        const pageSize = resolveLeadPageSize(query.pageSize ?? query.limit);
 
-        const page = query.page === undefined ? DEFAULT_PAGE : Math.max(Number(query.page), 1);
-        const limit = query.limit === undefined
-            ? DEFAULT_LIMIT
-            : Math.min(Math.max(Number(query.limit), 1), MAX_LIMIT);
+        const filter = {
+            temperature: query.temperature,
+            stage: query.stage,
+            campaignId: query.campaignId,
+            search: query.search,
+            sortBy: query.sortBy,
+            sortDir: query.dir,
+        };
 
-        const [{leads, total}, campaigns] = await Promise.all([
+        const [page, distribution, campaigns] = await Promise.all([
             this.leadRepo.getLeadList(query.accountId, {
-                temperature: query.temperature,
-                stage: query.stage,
-                search: query.search,
-                page,
-                limit,
-                sortBy: query.sortBy,
+                ...filter,
+                page: Math.max(Number(query.page ?? DEFAULT_PAGE), 1),
+                pageSize,
             }),
+            this.leadRepo.countByTemperature(query.accountId, period.start, period.end, query.campaignId),
             this.campaignRepo.findByAccountId(query.accountId),
         ]);
 
         const campaignNames = new Map(campaigns.map((campaign) => [campaign.id, campaign.name]));
         const assessments = await Promise.all(
-            leads.map((lead) => this.assessmentRepo.latestByLead(lead.id))
+            page.leads.map((lead) => this.assessmentRepo.latestByLead(lead.id))
         );
         const now = Date.now();
 
         return {
-            data: leads.map((lead, index) => ({
+            data: page.leads.map((lead, index) => ({
                 id: lead.id,
                 name: lead.name,
                 phoneMasked: lead.phoneMasked,
@@ -724,9 +846,105 @@ export class AudienceService {
                     : null,
                 createdAt: lead.createdAt.toISOString(),
             })),
-            page,
-            limit,
-            total,
+            page: page.page,
+            pageSize,
+            total: page.total,
+            pages: page.pages,
+            counts: {
+                cold: distribution.cold,
+                warm: distribution.warm,
+                hot: distribution.hot,
+                total: distribution.cold + distribution.warm + distribution.hot,
+            },
+        };
+    }
+
+    /**
+     * One lead for the detail page: attribution names, reply metrics, the level timeline, and the
+     * last 50 messages. A lead of another tenant is reported as missing, never as forbidden.
+     */
+    async getLeadDetail(tenantId: string, leadId: number): Promise<LeadDetailResponse> {
+        const lead = await this.leadRepo.getByIdForTenant(tenantId, leadId);
+        if (lead === null) throw new NotFoundError("Lead tidak ditemukan");
+
+        const [account, extras, movement, trail, assessment] = await Promise.all([
+            requireAccountScope(tenantId, lead.accountId),
+            this.leadRepo.getDetailExtras(leadId),
+            this.assessmentRepo.getMovement(leadId),
+            this.conversationRepo.findLatest(leadId, TRAIL_LIMIT),
+            this.assessmentRepo.latestByLead(leadId),
+        ]);
+
+        const now = Date.now();
+        const firstReplySeconds = lead.firstRepliedAt === null || lead.firstSeenAt === null
+            ? null
+            : Math.max(0, Math.round((lead.firstRepliedAt.getTime() - lead.firstSeenAt.getTime()) / 1000));
+        const pipelineEnd = lead.closedAt ?? new Date(now);
+
+        const explanation = await this.explanations.ensure({
+            tenantId,
+            accountId: lead.accountId,
+            context: "lead_detail",
+            entityType: "lead",
+            entityId: String(lead.id),
+            filter: {block: "detail"},
+            snapshotId: `${lead.id}..${lead.updatedAt.toISOString()}`,
+            facts: {
+                level: lead.temperature ?? "belum dinilai",
+                confidence: assessment?.confidence ?? "belum tersedia",
+                stage: lead.stage,
+                replied: lead.firstRepliedAt === null ? "belum dibalas" : "sudah dibalas",
+                temperature: lead.temperature ?? "belum dinilai",
+                wait: formatDuration(firstReplySeconds),
+            },
+            evidenceIds: [],
+        });
+
+        return {
+            id: lead.id,
+            name: lead.name,
+            phoneMasked: lead.phoneMasked,
+            emailMasked: null,
+            campaignName: extras.campaignName,
+            adName: extras.adName,
+            creativeName: extras.creativeName,
+            temperature: lead.temperature,
+            stage: lead.stage,
+            sentiment: lead.sentiment,
+            dealValueMinor: lead.dealValueMinor,
+            currency: lead.currency ?? account.currency,
+            attribution: {
+                method: lead.sourcePlatform,
+                note: lead.attributionNote,
+                confidence: assessment?.confidence ?? null,
+            },
+            metrics: {
+                waitingMinutes: lead.firstRepliedAt === null && lead.firstSeenAt !== null
+                    ? Math.max(0, Math.floor((now - lead.firstSeenAt.getTime()) / 60_000))
+                    : null,
+                firstReplySeconds,
+                messagesInbound: extras.messagesInbound,
+                messagesOutbound: extras.messagesOutbound,
+                daysInPipeline: lead.firstSeenAt === null
+                    ? null
+                    : Math.max(0, Math.floor((pipelineEnd.getTime() - lead.firstSeenAt.getTime()) / 86_400_000)),
+            },
+            movement: movement.map((point) => ({
+                level: point.level,
+                at: point.at.toISOString(),
+                reason: point.reason,
+                confidence: point.confidence,
+                applied: point.applied,
+            })),
+            trail: trail.map((message) => ({
+                at: message.sentAt.toISOString(),
+                direction: message.direction,
+                body: message.body,
+                responseType: message.responseType,
+                gapSeconds: message.responseSeconds,
+                isQuote: message.direction === "INBOUND" && message.contextWamid !== null,
+            })),
+            explanation,
         };
     }
 

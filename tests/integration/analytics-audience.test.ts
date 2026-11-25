@@ -622,6 +622,24 @@ describe("Audience intelligence", () => {
         expect(result.sample).toEqual({n: 3, denominator: 30, eligible: false, gate: "≥ 30 lead"});
     });
 
+    it("filters pipeline rows by q without changing the lane counts", async () => {
+        const all = await service.getPipeline(tenantId, {accountId, since: SINCE, until: UNTIL});
+        const filtered = await service.getPipeline(tenantId, {
+            accountId,
+            since: SINCE,
+            until: UNTIL,
+            q: "lead 1",
+        });
+
+        expect(all.lanes.map((lane) => [lane.level, lane.count])).toEqual([["HOT", 2], ["COLD", 1]]);
+        expect(filtered.lanes.length).toBe(1);
+        expect(filtered.lanes[0].level).toBe("HOT");
+        expect(filtered.lanes[0].count).toBe(2);
+        expect(filtered.lanes[0].rows.map((row) => row.leadId)).toEqual([l1.id]);
+        expect(filtered.rows.map((row) => row.leadId)).toEqual([l1.id]);
+        expect(filtered.sample.n).toBe(1);
+    });
+
     it("counts last classified answers, timed insights, and sentiment", async () => {
         const result = await service.getConversations(tenantId, {accountId, since: SINCE, until: UNTIL});
 
@@ -658,7 +676,7 @@ describe("Audience intelligence", () => {
         expect(hot.data.some((row) => row.confidence === "tinggi")).toBe(true);
         expect(hot.data.every((row) => row.waitingMinutes === null)).toBe(true);
 
-        const all = await service.listLeads(tenantId, {accountId, limit: "100"});
+        const all = await service.listLeads(tenantId, {accountId, pageSize: "15"});
         expect(all.total).toBe(8);
         expect(all.data.find((row) => row.id === l3.id)?.waitingMinutes).toBeGreaterThan(0);
         expect(all.data.find((row) => row.id === l1.id)?.waitingMinutes).toBeNull();
@@ -666,6 +684,70 @@ describe("Audience intelligence", () => {
         expect(unassessed?.temperature).toBeNull();
         expect(unassessed?.confidence).toBeNull();
         expect(unassessed?.campaignName).toBeNull();
+    });
+
+    it("paginates the lead list with pageSize, clamped pages, and period counts", async () => {
+        const first = await service.listLeads(tenantId, {accountId, pageSize: "5", since: SINCE, until: UNTIL});
+
+        expect(first.page).toBe(1);
+        expect(first.pageSize).toBe(5);
+        expect(first.total).toBe(8);
+        expect(first.pages).toBe(2);
+        expect(first.data.length).toBe(5);
+        expect(first.counts).toEqual({cold: 1, warm: 3, hot: 3, total: 7});
+        expect(first.counts.cold + first.counts.warm + first.counts.hot).toBe(first.counts.total);
+
+        const clamped = await service.listLeads(tenantId, {
+            accountId,
+            pageSize: "5",
+            page: "9",
+            since: SINCE,
+            until: UNTIL,
+        });
+        expect(clamped.page).toBe(2);
+        expect(clamped.data.length).toBe(3);
+
+        // `search` narrows the page, never the level counts.
+        const searched = await service.listLeads(tenantId, {
+            accountId,
+            search: "Lead 1",
+            since: SINCE,
+            until: UNTIL,
+        });
+        expect(searched.total).toBe(1);
+        expect(searched.counts.total).toBe(7);
+
+        const legacy = await service.listLeads(tenantId, {accountId, limit: "5"});
+        expect(legacy.pageSize).toBe(5);
+    });
+
+    it("sorts by temperature with null levels last", async () => {
+        const result = await service.listLeads(tenantId, {
+            accountId,
+            pageSize: "15",
+            sortBy: "temperature",
+            dir: "asc",
+        });
+
+        expect(result.data.map((row) => row.temperature)).toEqual([
+            "COLD", "WARM", "WARM", "WARM", "HOT", "HOT", "HOT", null,
+        ]);
+        expect(result.data[result.data.length - 1].id).toBe(l8.id);
+    });
+
+    it("rejects a page size outside 5, 10, and 15 with 422", async () => {
+        const token = await new JwtUtil().register({id: "user-audience", tenant: tenantId, role: "ADMIN"});
+        const response = await app.handle(new Request(
+            `http://localhost/api/leads?accountId=${accountId}&pageSize=7`,
+            {headers: {authorization: `Bearer ${token.key}`}}
+        ));
+
+        expect(response.status).toBe(422);
+        expect(await response.json()).toEqual({
+            status: false,
+            message: "pageSize harus 5, 10, atau 15",
+            code: "INVALID_PAGE_SIZE",
+        });
     });
 
     it("appends a manual assessment when the temperature changes", async () => {
@@ -712,11 +794,30 @@ describe("Audience intelligence", () => {
             expect(response.status).toBe(200);
         }
 
+        const pipelineResponse = await app.handle(new Request(
+            `http://localhost/api/analytics/audience/pipeline?${query}&q=lead`,
+            {headers}
+        ));
+        expect(pipelineResponse.status).toBe(200);
+        const pipelineBody = await pipelineResponse.json() as {
+            lanes: {level: string; count: number; rows: unknown[]}[];
+        };
+        expect(pipelineBody.lanes.length).toBe(2);
+        expect(pipelineBody.lanes.every((lane) => lane.rows.length > 0 && lane.count >= lane.rows.length)).toBe(true);
+
         const listResponse = await app.handle(new Request(
-            `http://localhost/api/leads?accountId=${accountId}`,
+            `http://localhost/api/leads?accountId=${accountId}&pageSize=15&since=${SINCE}&until=${UNTIL}`,
             {headers}
         ));
         expect(listResponse.status).toBe(200);
+        const listBody = await listResponse.json() as {
+            pageSize: number;
+            pages: number;
+            counts: {total: number};
+        };
+        expect(listBody.pageSize).toBe(15);
+        expect(listBody.pages).toBe(1);
+        expect(listBody.counts.total).toBe(7);
 
         const patchResponse = await app.handle(new Request(
             `http://localhost/api/leads/${l8.id}`,

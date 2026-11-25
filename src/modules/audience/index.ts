@@ -1,6 +1,6 @@
 import {Elysia} from "elysia";
 import {JwtUtil} from "@shared/jwt";
-import {AudienceService} from "@/modules/audience/service";
+import {AudienceService, resolveLeadPageSize} from "@/modules/audience/service";
 import {AudienceSchema} from "@/modules/audience/schema";
 
 export const AudienceController = new Elysia({
@@ -67,11 +67,24 @@ export const LeadController = new Elysia({
     .decorate("audienceService", new AudienceService())
     .use(JwtUtil.isAuthenticated)
     .get("/",
-        async ({user, query, audienceService}) => audienceService.listLeads(user.tenantId, query),
+        async ({user, query, audienceService}) => {
+            // Validated here so a bad page size is a 422 with its own code, not a generic validation error.
+            resolveLeadPageSize(query.pageSize ?? query.limit);
+            return audienceService.listLeads(user.tenantId, query);
+        },
         {
             query: AudienceSchema.leadList,
             detail: {
-                summary: "List leads of an account with filters and pagination"
+                summary: "List leads of an account with filters, sorting, and pagination"
+            }
+        })
+    .get("/:id",
+        async ({user, params: {id}, audienceService}) =>
+            audienceService.getLeadDetail(user.tenantId, Number(id)),
+        {
+            params: AudienceSchema.leadParams,
+            detail: {
+                summary: "Get one lead with attribution, metrics, level timeline, and message trail"
             }
         })
     .patch("/:id",

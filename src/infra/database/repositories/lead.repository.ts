@@ -7,15 +7,36 @@ import {and, asc, desc, eq, gte, ilike, isNull, lte, or, sql} from "drizzle-orm"
 export type Lead = typeof LeadEntity.$inferSelect;
 export type InsertLead = typeof LeadEntity.$inferInsert;
 
+/** Sort keys the list endpoint exposes; every one of them is nulls-last on both directions. */
+export type LeadSortBy =
+    | "createdAt"
+    | "firstSeenAt"
+    | "name"
+    | "response"
+    | "temperature"
+    | "analysis"
+    | "campaign";
+
 export interface LeadFilterParams {
     temperature?: "COLD" | "WARM" | "HOT";
     stage?: "CHAT_STARTED" | "REPLIED" | "QUALIFIED" | "CLOSING" | "CLOSED";
+    campaignId?: string;
     /** Matches `name` OR `phone_masked`, case-insensitive. */
     search?: string;
     page?: number;
+    pageSize?: number;
+    /** Deprecated alias of `pageSize`; ignored when `pageSize` is set. */
     limit?: number;
-    sortBy?: "createdAt" | "firstSeenAt";
+    sortBy?: LeadSortBy;
     sortDir?: "asc" | "desc";
+}
+
+export interface LeadPage {
+    leads: Lead[];
+    total: number;
+    /** Requested page clamped to `pages`, so an out-of-range page returns the last one. */
+    page: number;
+    pages: number;
 }
 
 export interface TemperatureCounts {
@@ -58,9 +79,23 @@ export interface ManualLeadChanges {
 const DEFAULT_PAGE_SIZE = 20;
 const MAX_PAGE_SIZE = 100;
 
-const SORT_COLUMNS = {
+/**
+ * `temperature` uses the enum order COLD < WARM < HOT; `analysis` is the newest applied assessment
+ * and `campaign` the campaign name. Both are scalar subqueries, so the page stays one statement.
+ */
+const SORT_EXPRESSIONS = {
     createdAt: LeadEntity.createdAt,
     firstSeenAt: LeadEntity.firstSeenAt,
+    name: LeadEntity.name,
+    response: LeadEntity.firstRepliedAt,
+    temperature: sql`case ${LeadEntity.temperature}
+        when 'HOT' then 3
+        when 'WARM' then 2
+        when 'COLD' then 1
+    end`,
+    analysis: sql`(select max(a.event_at) from lead_assessments a
+        where a.lead_id = ${LeadEntity.id} and a.applied = true)`,
+    campaign: sql`(select c.name from campaigns c where c.id = ${LeadEntity.campaignId})`,
 } as const;
 
 export class LeadRepository extends DatabaseRepository {
@@ -104,7 +139,12 @@ export class LeadRepository extends DatabaseRepository {
         return entity;
     }
 
-    async countByTemperature(accountId: string, since: Date, until: Date): Promise<TemperatureCounts> {
+    async countByTemperature(
+        accountId: string,
+        since: Date,
+        until: Date,
+        campaignId?: string
+    ): Promise<TemperatureCounts> {
         const [row] = await this.database.select({
             hot: sql<string>`count(*) filter (where ${LeadEntity.temperature} = 'HOT')`,
             warm: sql<string>`count(*) filter (where ${LeadEntity.temperature} = 'WARM')`,
@@ -115,7 +155,8 @@ export class LeadRepository extends DatabaseRepository {
                 and(
                     eq(LeadEntity.accountId, accountId),
                     gte(LeadEntity.firstSeenAt, since),
-                    lte(LeadEntity.firstSeenAt, until)
+                    lte(LeadEntity.firstSeenAt, until),
+                    campaignId === undefined ? undefined : eq(LeadEntity.campaignId, campaignId)
                 )
             );
 
@@ -218,20 +259,47 @@ export class LeadRepository extends DatabaseRepository {
         };
     }
 
-    async getLeadList(
-        accountId: string,
-        filter: LeadFilterParams
-    ): Promise<{ leads: Lead[]; total: number }> {
-        const page = Math.max(filter.page ?? 1, 1);
-        const limit = Math.min(Math.max(filter.limit ?? DEFAULT_PAGE_SIZE, 1), MAX_PAGE_SIZE);
-        const offset = (page - 1) * limit;
+    /**
+     * One page of the account's leads. `page` is clamped to the real page count instead of rejected,
+     * and `null` sort keys always land last regardless of `sortDir`.
+     */
+    async getLeadList(accountId: string, filter: LeadFilterParams): Promise<LeadPage> {
+        const pageSize = Math.min(
+            Math.max(filter.pageSize ?? filter.limit ?? DEFAULT_PAGE_SIZE, 1),
+            MAX_PAGE_SIZE
+        );
+        const conditions = this.listConditions(accountId, filter);
 
+        const [counted] = await this.database.select({total: sql<string>`count(*)`})
+            .from(LeadEntity)
+            .where(and(...conditions));
+
+        const total = Number(counted.total);
+        const pages = Math.max(1, Math.ceil(total / pageSize));
+        const page = Math.min(Math.max(filter.page ?? 1, 1), pages);
+        const direction = sql.raw(filter.sortDir ?? "desc");
+        const sortExpression = SORT_EXPRESSIONS[filter.sortBy ?? "createdAt"];
+
+        const leads = await this.database.select()
+            .from(LeadEntity)
+            .where(and(...conditions))
+            .orderBy(sql`${sortExpression} ${direction} nulls last`, desc(LeadEntity.id))
+            .limit(pageSize)
+            .offset((page - 1) * pageSize);
+
+        return {leads, total, page, pages};
+    }
+
+    private listConditions(accountId: string, filter: LeadFilterParams) {
         const conditions = [eq(LeadEntity.accountId, accountId)];
         if (filter.temperature !== undefined) {
             conditions.push(eq(LeadEntity.temperature, filter.temperature));
         }
         if (filter.stage !== undefined) {
             conditions.push(eq(LeadEntity.stage, filter.stage));
+        }
+        if (filter.campaignId !== undefined) {
+            conditions.push(eq(LeadEntity.campaignId, filter.campaignId));
         }
         if (filter.search !== undefined && filter.search.length > 0) {
             const pattern = `%${filter.search.replace(/[\\%_]/g, "\\$&")}%`;
@@ -244,22 +312,7 @@ export class LeadRepository extends DatabaseRepository {
             }
         }
 
-        const sortColumn = SORT_COLUMNS[filter.sortBy ?? "createdAt"];
-        const order = (filter.sortDir ?? "desc") === "asc" ? asc(sortColumn) : desc(sortColumn);
-
-        const [leads, [counted]] = await Promise.all([
-            this.database.select()
-                .from(LeadEntity)
-                .where(and(...conditions))
-                .orderBy(order)
-                .limit(limit)
-                .offset(offset),
-            this.database.select({total: sql<string>`count(*)`})
-                .from(LeadEntity)
-                .where(and(...conditions)),
-        ]);
-
-        return {leads, total: Number(counted.total)};
+        return conditions;
     }
 
     async findById(id: number): Promise<Lead | null> {
@@ -356,6 +409,51 @@ export class LeadRepository extends DatabaseRepository {
         `) as unknown as {hour: number; leads: string}[];
 
         return rows.map((row) => ({hour: Number(row.hour), leads: Number(row.leads)}));
+    }
+
+    /**
+     * Names behind the lead's attribution ids plus its message counts. Missing parents stay `null`
+     * instead of dropping the row: an ad can be deleted while its leads remain.
+     */
+    async getDetailExtras(leadId: number): Promise<{
+        campaignName: string | null;
+        adName: string | null;
+        creativeName: string | null;
+        messagesInbound: number;
+        messagesOutbound: number;
+    }> {
+        const [row] = await this.database.execute(sql`
+            select c.name                as campaign_name,
+                   a.name                as ad_name,
+                   cr.name               as creative_name,
+                   coalesce(m.inbound, 0)  as messages_inbound,
+                   coalesce(m.outbound, 0) as messages_outbound
+            from leads l
+            left join campaigns c on c.id = l.campaign_id
+            left join ads a on a.id = l.ad_id
+            left join ad_creatives cr on cr.id = l.creative_id
+            left join lateral (
+                select count(*) filter (where cm.direction = 'INBOUND')  as inbound,
+                       count(*) filter (where cm.direction = 'OUTBOUND') as outbound
+                from conversation_messages cm
+                where cm.lead_id = l.id
+            ) m on true
+            where l.id = ${leadId}
+        `) as unknown as {
+            campaign_name: string | null;
+            ad_name: string | null;
+            creative_name: string | null;
+            messages_inbound: string;
+            messages_outbound: string;
+        }[];
+
+        return {
+            campaignName: row?.campaign_name ?? null,
+            adName: row?.ad_name ?? null,
+            creativeName: row?.creative_name ?? null,
+            messagesInbound: Number(row?.messages_inbound ?? 0),
+            messagesOutbound: Number(row?.messages_outbound ?? 0),
+        };
     }
 
     /**

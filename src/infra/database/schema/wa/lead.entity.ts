@@ -1,5 +1,5 @@
-import {bigint, bigserial, jsonb, pgTable, text, timestamp, uniqueIndex, uuid, varchar} from "drizzle-orm/pg-core";
-import {relations} from "drizzle-orm";
+import {bigint, bigserial, index, jsonb, pgTable, text, timestamp, uniqueIndex, uuid, varchar} from "drizzle-orm/pg-core";
+import {relations, sql} from "drizzle-orm";
 import {AdAccountEntity} from "@db/schema/ads/ad-account.entity";
 import {WaPhoneEntity} from "@db/schema/wa/wa-phone.entity";
 import {CampaignEntity} from "@db/schema/ads/campaign.entity";
@@ -39,6 +39,8 @@ export const LeadEntity = pgTable("leads", {
     updatedAt: timestamp("updated_at", {withTimezone: true}).defaultNow().notNull(),
 }, (t) => ({
     uqAccountExternal: uniqueIndex("uq_leads_account_external").on(t.accountId, t.externalId),
+    /** Trigram index for the `ilike '%q%'` lead search; requires the `pg_trgm` extension. */
+    idxNameTrgm: index("idx_leads_name_trgm").using("gin", sql`${t.name} gin_trgm_ops`),
 }));
 
 export const LeadRelationship = relations(LeadEntity, ({one}) => ({
