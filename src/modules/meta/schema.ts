@@ -65,6 +65,11 @@ export const MetaSchema = {
     queuePixelStatsSync: t.Optional(t.Object({
         accountId: t.Optional(t.String()),
     })),
+    dlqParams: t.Object({
+        id: t.String({
+            description: "BullMQ job id of the dead-letter entry",
+        }),
+    }),
 }
 
 export type MetaSchema = {

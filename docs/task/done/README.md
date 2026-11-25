@@ -26,3 +26,4 @@ Daftar fitur backend yang telah selesai diimplementasikan dan diuji:
 | 20 | **Detail Lead, Kontrak Daftar Lead, Pipeline Lane, Global Search** | [`20-lead-detail-pipeline-search.md`](./20-lead-detail-pipeline-search.md) | 2026-11-25 | Selesai & Teruji ✅ |
 | 21 | **Report & Export (tren kreatif, CSV campaign, audit ekspor)** | [`21-report-export.md`](./21-report-export.md) | 2026-11-25 | Selesai & Teruji ✅ |
 | 22 | **Settings Workspace (objek workspace, mode read-only, status sumber, limits)** | [`22-settings-workspace.md`](./22-settings-workspace.md) | 2026-11-25 | Selesai & Teruji ✅ |
+| 23 | **Operasional Produksi (cache, health probe, DLQ, rate limit, metrik, retensi)** | [`23-ops-production.md`](./23-ops-production.md) | 2026-11-25 | Selesai & Teruji ✅ |

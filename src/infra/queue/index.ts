@@ -52,7 +52,13 @@ export class WorkerManager<TData = any, TResult = any, TName extends string = st
     private static readonly instances: Set<WorkerManager<any, any, any>> = new Set();
     private readonly worker: Worker<TData, TResult, TName>;
 
-    constructor(queueName: string, processor: (job: Job<TData, TResult, TName>) => Promise<TResult>, options?: WorkerOptions) {
+    constructor(
+        queueName: string,
+        processor: (job: Job<TData, TResult, TName>) => Promise<TResult>,
+        options?: WorkerOptions,
+        /** Runs once, after the job burned its last attempt: the hook that feeds the dead-letter queue. */
+        private readonly onExhausted?: (job: Job<TData, TResult, TName>, error: Error) => Promise<void>
+    ) {
         this.worker = new Worker<TData, TResult, TName>(queueName, processor, {
             connection: redisConnection,
             ...options,
@@ -64,8 +70,21 @@ export class WorkerManager<TData = any, TResult = any, TName extends string = st
             logger.info(`[Worker] Job #${job.id} (${job.name}) selesai diproses.`);
         });
 
-        this.worker.on("failed", (job, err) => {
+        this.worker.on("failed", async (job, err) => {
             logger.error(`[Worker] Job #${job?.id} (${job?.name}) gagal: ${err.message}`);
+
+            if (job === undefined || this.onExhausted === undefined) return;
+
+            // `attemptsMade` is already incremented when `failed` fires, so a job that retries again
+            // has fewer attempts left than its budget.
+            const budget = job.opts.attempts ?? 1;
+            if (job.attemptsMade < budget) return;
+
+            try {
+                await this.onExhausted(job, err);
+            } catch (hookError) {
+                logger.error({err: hookError, jobId: job.id}, "[Worker] Dead-letter hook failed");
+            }
         });
     }
 

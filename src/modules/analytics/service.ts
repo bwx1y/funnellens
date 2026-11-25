@@ -6,6 +6,7 @@ import {TrackingHealthRepository} from "@db/repositories/tracking-health.reposit
 import {CampaignRepository} from "@db/repositories/campaign.repository";
 import {InsightAlertRepository} from "@db/repositories/insight-alert.repository";
 import {requireAccountScope} from "@db/repositories/ad-account.repository";
+import {AggregationCache, AGGREGATION_CACHE_TTL_SECONDS} from "@infra/cache";
 import {BadRequestError} from "@shared/errors";
 import {bucketIndex, addDays, dateRange, dayCount, endOfDayUtc, startOfDayUtc} from "@shared/dates";
 import {direction, round4, type DeltaDirection} from "@shared/numbers";
@@ -160,6 +161,16 @@ export interface FunnelQuery {
     objectiveGroup?: FunnelObjectiveGroup;
 }
 
+/** The fields the aggregation cache keys on; every cached query is a superset of this. */
+interface CacheableQuery {
+    accountId: string;
+    since?: string;
+    until?: string;
+    days?: number;
+    campaignId?: string;
+    objectiveGroup?: string;
+}
+
 export interface LeakageQuery {
     accountId: string;
     since?: string;
@@ -312,10 +323,31 @@ export class AnalyticsService {
         private readonly trackingHealthRepo = new TrackingHealthRepository(),
         private readonly campaignRepo = new CampaignRepository(),
         private readonly alertRepo = new InsightAlertRepository(),
-        private readonly explanations = new ExplanationService()
+        private readonly explanations = new ExplanationService(),
+        private readonly cache = new AggregationCache()
     ) {}
 
+    /**
+     * Read-through cache for the three heavy aggregations. The key carries the tenant, so the lookup
+     * happens before the account scope check — a second identical call must not reach Postgres at all.
+     * `getStageDetail` is deliberately absent: `stageKey` multiplies the key space for little reuse.
+     */
+    private async cached<T>(endpoint: string, tenantId: string, query: CacheableQuery, build: () => Promise<T>): Promise<T> {
+        const key = this.cache.key({endpoint, tenantId, ...query});
+        const hit = await this.cache.get<T>(key);
+        if (hit !== null) return hit;
+
+        const value = await build();
+        await this.cache.set(key, value, AGGREGATION_CACHE_TTL_SECONDS);
+
+        return value;
+    }
+
     async getSummary(tenantId: string, query: SummaryQuery): Promise<SummaryResponse> {
+        return this.cached("summary", tenantId, query, () => this.buildSummary(tenantId, query));
+    }
+
+    private async buildSummary(tenantId: string, query: SummaryQuery): Promise<SummaryResponse> {
         const account = await requireAccountScope(tenantId, query.accountId);
 
         const {since, until, days, previousSince, previousUntil, start, end, prevStart, prevEnd} =
@@ -577,6 +609,10 @@ export class AnalyticsService {
     }
 
     async getFunnel(tenantId: string, query: FunnelQuery): Promise<FunnelResponse> {
+        return this.cached("funnel", tenantId, query, () => this.buildFunnel(tenantId, query));
+    }
+
+    private async buildFunnel(tenantId: string, query: FunnelQuery): Promise<FunnelResponse> {
         const account = await requireAccountScope(tenantId, query.accountId);
         const objectiveGroup = query.objectiveGroup ?? "wa";
         const period = resolvePeriod(account, query);
@@ -640,6 +676,10 @@ export class AnalyticsService {
     }
 
     async getLeakage(tenantId: string, query: LeakageQuery): Promise<LeakageResponse> {
+        return this.cached("leakage", tenantId, query, () => this.buildLeakage(tenantId, query));
+    }
+
+    private async buildLeakage(tenantId: string, query: LeakageQuery): Promise<LeakageResponse> {
         const account = await requireAccountScope(tenantId, query.accountId);
         const period = resolvePeriod(account, query);
 

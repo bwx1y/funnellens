@@ -8,8 +8,10 @@ import {
 } from "./queue";
 import {MetaService} from "./service";
 import {PixelStatsSyncService} from "./pixel-stats.service";
+import {MetaSyncDeadLetter} from "./dead-letter";
 import {MetaConnectionRepository} from "@db/repositories/meta-connection.repository";
 import {AdAccountRepository} from "@db/repositories/ad-account.repository";
+import {AggregationCache} from "@infra/cache";
 import {logger} from "@shared/logger";
 
 export class MetaSyncWorkerProcessor {
@@ -17,7 +19,9 @@ export class MetaSyncWorkerProcessor {
         private readonly metaService = new MetaService(),
         private readonly metaConnectionRepo = new MetaConnectionRepository(),
         private readonly adAccountRepo = new AdAccountRepository(),
-        private readonly pixelStatsService = new PixelStatsSyncService()
+        private readonly pixelStatsService = new PixelStatsSyncService(),
+        private readonly cache = new AggregationCache(),
+        private readonly deadLetter = new MetaSyncDeadLetter()
     ) {}
 
     async process(job: Job<MetaSyncJobData, void, MetaSyncJobName>): Promise<void> {
@@ -69,6 +73,7 @@ export class MetaSyncWorkerProcessor {
                 {iss: target.userId, tenantId: target.tenantId},
                 {accountId: target.accountId, since, until, includeBreakdowns: true}
             );
+            await this.refreshAfterSync(target.accountId);
         }
     }
 
@@ -85,7 +90,17 @@ export class MetaSyncWorkerProcessor {
                 {iss: target.userId, tenantId: target.tenantId},
                 {accountId: target.accountId, since, until, includeBreakdowns: true}
             );
+            await this.refreshAfterSync(target.accountId);
         }
+    }
+
+    /**
+     * Fresh numbers make every cached aggregation of the account wrong, and the `sync_failed` alert the
+     * dead letter opened obsolete. Both are best-effort: the sync already succeeded.
+     */
+    async refreshAfterSync(accountId: string): Promise<void> {
+        await this.cache.invalidateAccount(accountId);
+        await this.deadLetter.clearAlert(accountId);
     }
 
     private async handleHourlyBreakdownSync(data: MetaSyncHourlyBreakdownsJobPayload): Promise<void> {
@@ -150,5 +165,10 @@ const processor = new MetaSyncWorkerProcessor();
 
 export const metaSyncWorker = new WorkerManager<MetaSyncJobData, void, MetaSyncJobName>(
     META_SYNC_QUEUE_NAME,
-    async (job) => processor.process(job)
+    async (job) => processor.process(job),
+    undefined,
+    // Only a job that burned its whole attempt budget lands here; BullMQ has already stopped retrying.
+    async (job, error) => {
+        await new MetaSyncDeadLetter().record(job.name, job.data, error.message, job.attemptsMade);
+    }
 );

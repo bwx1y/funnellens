@@ -58,6 +58,13 @@ export const Config = {
     analytics: {
         maturityDays: parseInt(getEnv("ANALYTICS_MATURITY_DAYS", "7")),
     },
+    retention: {
+        /** Insight rows older than this are deleted; the funnel only reports recent windows. */
+        insightDays: parseInt(getEnv("RETENTION_INSIGHT_DAYS", "400")),
+        /** Message bodies are nulled, never deleted: the row carries the response statistics. */
+        messageBodyDays: parseInt(getEnv("RETENTION_MESSAGE_BODY_DAYS", "180")),
+        syncRunDays: parseInt(getEnv("RETENTION_SYNC_RUN_DAYS", "90")),
+    },
     whatsapp: {
         verifyToken: getEnv("WA_VERIFY_TOKEN", ""),
     },

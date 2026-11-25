@@ -10,12 +10,23 @@ interface Payload extends JWTPayload {
     tenantId?: string
 }
 
+/**
+ * The context `JwtUtil.isAuthenticated` derives. Global plugins run before any route, so their context
+ * type does not include it; they read it through this type instead of `any`.
+ */
+export interface AuthenticatedUser {
+    iss: string
+    sid: string
+    tenantId: string
+    role: typeof roleEnum.enumValues[number]
+}
+
 export class JwtUtil {
     private static readonly JWT_SECRET = new TextEncoder().encode(Config.application.secret);
 
     static readonly isAuthenticated = new Elysia()
         .derive({ as: "scoped" }, async ({headers: {authorization}}): Promise<{
-            user: { iss: string, sid: string, tenantId: string, role: typeof roleEnum.enumValues[number] }
+            user: AuthenticatedUser
         }> => {
             if (!authorization || !authorization.startsWith("Bearer ")) {
                 throw new UnauthorizedError("Token not found");

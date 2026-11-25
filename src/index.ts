@@ -4,11 +4,14 @@ import {AppError} from "@shared/errors";
 import {Config} from "@/config";
 import {routes} from "@/routes";
 import {httpLogger} from "@/plugins/logger.plugin";
+import {rateLimit} from "@/plugins/rate-limit.plugin";
+import {idempotency} from "@/plugins/idempotency.plugin";
 import {WorkerManager} from "@infra/queue";
 import {redisConnection} from "@infra/redis";
 import {logger} from "@shared/logger";
 import {WaSessionService} from "@/modules/wa/session/service";
 import {AlertsQueue} from "@/modules/alerts/queue";
+import {RetentionQueue} from "@/modules/retention/queue";
 
 // Dynamic discovery of worker files across feature modules
 const workerGlob = new Bun.Glob("./modules/**/worker.ts");
@@ -18,6 +21,10 @@ for await (const file of workerGlob.scan({ cwd: import.meta.dir })) {
 
 export const app = new Elysia()
     .use(httpLogger)
+    // Order matters: the id runs first so every later log line and error carries it, the limiter runs
+    // before the idempotency replay so a retry storm cannot bypass the budget.
+    .use(rateLimit)
+    .use(idempotency)
     .onError(({code, error, set}) => {
         if (error instanceof AppError) {
             set.status = error.statusCode
@@ -127,6 +134,12 @@ if (Config.application.mode !== "test") {
     const alertsQueue = new AlertsQueue();
     void alertsQueue.scheduleCronJobs().catch((err) => {
         logger.warn({err}, "[Startup] Alert evaluation scheduler failed");
+    });
+
+    // Nightly retention: old insights, message bodies, and sync-run rows.
+    const retentionQueue = new RetentionQueue();
+    void retentionQueue.scheduleCronJobs().catch((err) => {
+        logger.warn({err}, "[Startup] Retention scheduler failed");
     });
 
     let isShuttingDown = false;

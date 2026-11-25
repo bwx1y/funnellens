@@ -83,6 +83,20 @@ export class SyncRunRepository extends DatabaseRepository {
         return {error: entity.error, finishedAt: entity.finishedAt};
     }
 
+    /** Newest successful insight sync across every account: the readiness probe has no account context. */
+    async findLatestSuccessAnyAccount(): Promise<Date | null> {
+        const [entity] = await this.database.select({finishedAt: SyncRunEntity.finishedAt})
+            .from(SyncRunEntity)
+            .where(and(
+                eq(SyncRunEntity.status, "SUCCESS"),
+                isNotNull(SyncRunEntity.finishedAt)
+            ))
+            .orderBy(desc(SyncRunEntity.finishedAt))
+            .limit(1);
+
+        return entity?.finishedAt ?? null;
+    }
+
     async getLatestByAccountId(accountId: string, resource?: string): Promise<typeof SyncRunEntity.$inferSelect | null> {
         const conditions = [eq(SyncRunEntity.accountId, accountId)];
         if (resource) {

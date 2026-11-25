@@ -48,6 +48,9 @@ package-lock.json
 yarn.lock
 pnpm-lock.yaml
 
+# database dumps written by `bun run db:backup`
+/backup/
+
 # tool artifacts
 graphify-out/
 .omp

@@ -3,9 +3,12 @@ import {JwtUtil} from "@shared/jwt";
 import {MetaService} from "@/modules/meta/service";
 import {MetaSchema} from "@/modules/meta/schema";
 import {MetaSyncQueue} from "@/modules/meta/queue";
+import {MetaSyncDlq} from "@/modules/meta/dlq";
+import {ForbiddenError, NotFoundError} from "@shared/errors";
 
 const metaService = new MetaService();
 const metaSyncQueue = new MetaSyncQueue();
+const metaSyncDlq = new MetaSyncDlq();
 
 // callback is public: Meta redirects the browser here without our JWT
 export const MetaOAuthController = new Elysia({
@@ -144,5 +147,35 @@ export const MetaController = new Elysia({
             body: MetaSchema.queuePixelStatsSync,
             detail: {
                 summary: "Enqueue background pixel stats sync job"
+            }
+        })
+    .get("/queue/dlq",
+        async ({user}) => {
+            if (user.role !== "ADMIN") {
+                throw new ForbiddenError("Only ADMIN can access this resource");
+            }
+
+            return metaSyncDlq.list();
+        },
+        {
+            detail: {
+                summary: "List the last 50 dead-lettered Meta sync jobs"
+            }
+        })
+    .delete("/queue/dlq/:id",
+        async ({user, params: {id}}) => {
+            if (user.role !== "ADMIN") {
+                throw new ForbiddenError("Only ADMIN can access this resource");
+            }
+
+            const removed = await metaSyncDlq.remove(id);
+            if (!removed) throw new NotFoundError("Entri DLQ tidak ditemukan");
+
+            return {deleted: true, id};
+        },
+        {
+            params: MetaSchema.dlqParams,
+            detail: {
+                summary: "Drop a handled dead-letter entry"
             }
         });

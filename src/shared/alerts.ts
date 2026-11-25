@@ -8,7 +8,13 @@ import type {FunnelStageKey} from "@shared/funnel";
 export type AlertStatusFilter = "active" | "snoozed" | "resolved";
 
 export type LeakRuleKey = "leak_click_to_landing" | "leak_chat_to_reply" | "leak_qualified_to_closed";
-export type AlertRuleKey = LeakRuleKey | "unreplied_hot_lead" | "creative_fatigue" | "tracking_emq";
+/** `sync_failed` is written by the dead-letter hook, not the hourly evaluator: it fires when a job dies. */
+export type AlertRuleKey =
+    | LeakRuleKey
+    | "unreplied_hot_lead"
+    | "creative_fatigue"
+    | "tracking_emq"
+    | "sync_failed";
 
 /** The three WhatsApp leakage transitions; the `≈{gap} chat hilang` caption only holds for this channel. */
 export const LEAK_RULES: {ruleKey: LeakRuleKey; from: FunnelStageKey; to: FunnelStageKey}[] = [

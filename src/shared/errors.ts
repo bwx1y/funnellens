@@ -51,3 +51,8 @@ export class InternalError extends AppError {
         super(message, 500, code)
     }
 }
+export class RateLimitError extends AppError {
+    constructor(message: string = "Too Many Requests", code?: string) {
+        super(message, 429, code)
+    }
+}
