@@ -31,7 +31,7 @@ export class UserService {
             email: body.email,
             hashPassword,
             tenantId,
-            role: body.role ?? "ADMIN",
+            role: body.role ?? "VIEWER",
             verifiedAt: new Date(),
         });
 
@@ -61,7 +61,7 @@ export class UserService {
         const updateData: {
             fullName?: string;
             email?: string;
-            role?: "ADMIN" | "MANAGER";
+            role?: "ADMIN" | "VIEWER";
             hashPassword?: string;
         } = {};
 

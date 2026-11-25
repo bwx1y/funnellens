@@ -18,6 +18,7 @@ import {AdCreativeEntity} from "@db/schema/ads/ad-creative.entity";
 import {InsightAlertEntity} from "@db/schema/ads/insight-alert.entity";
 import {JwtUtil} from "@shared/jwt";
 import {eq} from "drizzle-orm";
+import {readData, readError} from "../helpers";
 
 class TestCleanupRepository extends DatabaseRepository {
     async cleanup(tenantId: string): Promise<void> {
@@ -339,7 +340,7 @@ describe("Analytics summary", () => {
         ));
 
         expect(response.status).toBe(200);
-        const body = await response.json() as {cards: {spend: {value: number}}};
+        const body = await readData<{cards: {spend: {value: number}}}>(response);
         expect(body.cards.spend).toBeDefined();
         expect(body.cards.spend.value).toBe(150000);
     });
@@ -352,6 +353,10 @@ describe("Analytics summary", () => {
         ));
 
         expect(response.status).toBe(404);
-        expect(await response.json()).toEqual({status: false, message: "Akun iklan tidak ditemukan"});
+        expect(await readError(response)).toEqual({
+            code: "NOT_FOUND",
+            message: "Akun iklan tidak ditemukan",
+            details: null,
+        });
     });
 });

@@ -16,6 +16,7 @@ import {JwtUtil} from "@shared/jwt";
 import {eq} from "drizzle-orm";
 import {AudienceService} from "@/modules/audience/service";
 import {SearchService} from "@/modules/search/service";
+import {readData, readError} from "../helpers";
 
 class TestCleanupRepository extends DatabaseRepository {
     async cleanup(tenantId: string): Promise<void> {
@@ -298,7 +299,11 @@ describe("Lead detail and global search", () => {
         ));
 
         expect(response.status).toBe(404);
-        expect(await response.json()).toEqual({status: false, message: "Lead tidak ditemukan"});
+        expect(await readError(response)).toEqual({
+            code: "NOT_FOUND",
+            message: "Lead tidak ditemukan",
+            details: null,
+        });
     });
 
     it("serves the lead detail route for the authenticated tenant", async () => {
@@ -309,7 +314,7 @@ describe("Lead detail and global search", () => {
         ));
 
         expect(response.status).toBe(200);
-        const body = await response.json() as {id: number; trail: unknown[]; movement: unknown[]};
+        const body = await readData<{id: number; trail: unknown[]; movement: unknown[]}>(response);
         expect(body.id).toBe(leadId);
         expect(body.trail.length).toBe(3);
         expect(body.movement.length).toBe(4);
@@ -371,7 +376,7 @@ describe("Lead detail and global search", () => {
             {headers}
         ));
         expect(ok.status).toBe(200);
-        const body = await ok.json() as {leads: unknown[]; meta: {truncated: boolean}};
+        const body = await readData<{leads: unknown[]; meta: {truncated: boolean}}>(ok);
         expect(body.leads.length).toBe(8);
         expect(body.meta.truncated).toBe(true);
 
@@ -380,6 +385,10 @@ describe("Lead detail and global search", () => {
             {headers}
         ));
         expect(foreign.status).toBe(404);
-        expect(await foreign.json()).toEqual({status: false, message: "Akun iklan tidak ditemukan"});
+        expect(await readError(foreign)).toEqual({
+            code: "NOT_FOUND",
+            message: "Akun iklan tidak ditemukan",
+            details: null,
+        });
     });
 });

@@ -1,5 +1,6 @@
 import {afterAll, beforeAll, describe, expect, it} from "bun:test";
 import {app} from "@/index";
+import {readData, readError} from "../helpers";
 import {db} from "@db/index";
 import {DatabaseRepository} from "@db/repositories/base.repository";
 import {AdCreativeRepository} from "@db/repositories/ad-creative.repository";
@@ -535,7 +536,7 @@ describe("Creative intelligence", () => {
             `http://localhost/api/analytics/creatives/fatigue?${query}`,
             {headers}
         ));
-        expect(Object.keys(await fatigue.json() as object).sort())
+        expect(Object.keys(await readData<object>(fatigue)).sort())
             .toEqual(["creatives", "explanation", "period", "sample"]);
 
         const comparison = await app.handle(new Request(
@@ -585,6 +586,10 @@ describe("Creative intelligence", () => {
         ));
 
         expect(response.status).toBe(404);
-        expect(await response.json()).toEqual({status: false, message: "Akun iklan tidak ditemukan"});
+        expect(await readError(response)).toEqual({
+            code: "NOT_FOUND",
+            message: "Akun iklan tidak ditemukan",
+            details: null,
+        });
     });
 });

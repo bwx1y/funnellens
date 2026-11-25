@@ -17,6 +17,7 @@ import {ConversationMessageEntity} from "@db/schema/wa/conversation-message.enti
 import {JwtUtil} from "@shared/jwt";
 import {encrypt} from "@shared/crypto";
 import {eq} from "drizzle-orm";
+import {readData} from "../helpers";
 
 class TestCleanupRepository extends DatabaseRepository {
     async cleanup(tenantId: string): Promise<void> {
@@ -71,7 +72,7 @@ describe("Settings workspace", () => {
             headers: {authorization: `Bearer ${token.key}`},
         }));
         expect(response.status).toBe(200);
-        return await response.json() as SettingsBody;
+        return await readData<SettingsBody>(response);
     };
 
     const source = (body: SettingsBody, key: "meta" | "whatsapp") => {

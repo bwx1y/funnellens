@@ -10,15 +10,14 @@ import {
     type ManualLeadChanges,
 } from "@db/repositories/lead.repository";
 import {requireAccountScope} from "@db/repositories/ad-account.repository";
-import {NotFoundError, UnprocessableEntityError} from "@shared/errors";
+import {NotFoundError} from "@shared/errors";
 import {safeTimeZone} from "@shared/dates";
 import {round2, round4} from "@shared/numbers";
 import {isPartialDay, periodLabel, resolvePeriod} from "@shared/period";
 import {ExplanationService, type ExplanationRef} from "@/modules/explanations/service";
 import {formatDuration, formatNumber, formatPercent} from "@/modules/explanations/rules";
+import {pageMeta, resolvePageSize, type PageMeta} from "@shared/pagination";
 import {
-    DEFAULT_PAGE_SIZE,
-    LEAD_PAGE_SIZES,
     REPLY_TYPES,
     RESPONSE_BUCKETS,
     buildSankey,
@@ -186,8 +185,10 @@ export interface LeadListQuery {
     campaignId?: string;
     search?: string;
     page?: string;
+    page_size?: string;
+    /** Deprecated alias of `page_size`; only read when `page_size` is absent. */
     pageSize?: string;
-    /** Deprecated alias of `pageSize`; only read when `pageSize` is absent. */
+    /** Deprecated alias of `page_size`; only read when `page_size` and `pageSize` are absent. */
     limit?: string;
     sortBy?: LeadSortBy;
     dir?: "asc" | "desc";
@@ -210,10 +211,17 @@ export interface LeadListRow {
 }
 
 export interface LeadListResponse {
-    data: LeadListRow[];
+    items: LeadListRow[];
+    meta: PageMeta;
+    /** @deprecated alias of `meta.page`. */
     page: number;
+    /** @deprecated alias of `meta.page_size`. */
     pageSize: number;
+    /** @deprecated alias of `meta.page_size`. */
+    limit: number;
+    /** @deprecated alias of `meta.total`. */
     total: number;
+    /** @deprecated alias of `meta.pages`. */
     pages: number;
     /** Period and campaign scope, never narrowed by `search`/`temperature`/`page`. */
     counts: {cold: number; warm: number; hot: number; total: number};
@@ -281,18 +289,6 @@ export interface LeadUpdateResponse {
 
 const DEFAULT_PAGE = 1;
 const TRAIL_LIMIT = 50;
-
-/** Maps the legacy `limit` alias and rejects every size outside {@link LEAD_PAGE_SIZES}. */
-export function resolveLeadPageSize(value: string | undefined): number {
-    if (value === undefined) return DEFAULT_PAGE_SIZE;
-
-    const size = Number(value);
-    if (!LEAD_PAGE_SIZES.includes(size as typeof LEAD_PAGE_SIZES[number])) {
-        throw new UnprocessableEntityError("pageSize harus 5, 10, atau 15", "INVALID_PAGE_SIZE");
-    }
-
-    return size;
-}
 
 export class AudienceService {
     constructor(
@@ -810,7 +806,8 @@ export class AudienceService {
     async listLeads(tenantId: string, query: LeadListQuery): Promise<LeadListResponse> {
         const account = await requireAccountScope(tenantId, query.accountId);
         const period = resolvePeriod(account, query);
-        const pageSize = resolveLeadPageSize(query.pageSize ?? query.limit);
+        // `page_size` is the contract; `pageSize` and `limit` are aliases kept for one release.
+        const pageSize = resolvePageSize(query.page_size ?? query.pageSize ?? query.limit);
 
         const filter = {
             temperature: query.temperature,
@@ -837,8 +834,7 @@ export class AudienceService {
         );
         const now = Date.now();
 
-        return {
-            data: page.leads.map((lead, index) => ({
+        const items = page.leads.map((lead, index) => ({
                 id: lead.id,
                 name: lead.name,
                 phoneMasked: lead.phoneMasked,
@@ -853,9 +849,14 @@ export class AudienceService {
                     : null,
                 createdAt: lead.createdAt.toISOString(),
                 attribution: {method: lead.attributionMethod, confidence: lead.attributionConfidence},
-            })),
+            }));
+
+        return {
+            items,
+            meta: pageMeta(page.page, pageSize, page.total),
             page: page.page,
             pageSize,
+            limit: pageSize,
             total: page.total,
             pages: page.pages,
             counts: {

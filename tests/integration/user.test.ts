@@ -7,6 +7,7 @@ import { DatabaseRepository } from "@db/repositories/base.repository";
 import { eq } from "drizzle-orm";
 import { UserEntity } from "@db/schema/core/user.entity";
 import { TenantEntity } from "@db/schema/core/tenant.entity";
+import { readData, readError } from "../helpers";
 
 class TestCleanupRepository extends DatabaseRepository {
     async cleanup(tenantId: string) {
@@ -19,15 +20,10 @@ interface UserResponse {
     id: string;
     fullName: string;
     email: string;
-    role: "ADMIN" | "MANAGER";
+    role: "ADMIN" | "VIEWER";
     verifiedAt: string | null;
     tenantId: string;
     hashPassword?: string;
-}
-
-interface ErrorResponse {
-    status: boolean;
-    message: string;
 }
 
 describe("User CRUD & Multi-Tenant Authorization", () => {
@@ -39,11 +35,11 @@ describe("User CRUD & Multi-Tenant Authorization", () => {
     let tenantA: { id: string; name: string };
     let tenantB: { id: string; name: string };
     let adminA: { id: string; email: string };
-    let managerA: { id: string; email: string };
+    let viewerA: { id: string; email: string };
     let adminB: { id: string; email: string };
 
     let tokenAdminA: string;
-    let tokenManagerA: string;
+    let tokenViewerA: string;
     let tokenAdminB: string;
 
     beforeAll(async () => {
@@ -65,11 +61,11 @@ describe("User CRUD & Multi-Tenant Authorization", () => {
             tenantId: tenantA.id,
         });
 
-        managerA = await userRepo.create({
-            fullName: "Manager A",
-            email: `managerA_${unique}@test.com`,
+        viewerA = await userRepo.create({
+            fullName: "Viewer A",
+            email: `viewerA_${unique}@test.com`,
             hashPassword: "hash",
-            role: "MANAGER",
+            role: "VIEWER",
             tenantId: tenantA.id,
         });
 
@@ -88,12 +84,12 @@ describe("User CRUD & Multi-Tenant Authorization", () => {
         });
         tokenAdminA = resTokenA.key;
 
-        const resTokenMgr = await jwtUtil.register({
-            id: managerA.id,
+        const resTokenViewer = await jwtUtil.register({
+            id: viewerA.id,
             tenant: tenantA.id,
-            role: "MANAGER",
+            role: "VIEWER",
         });
-        tokenManagerA = resTokenMgr.key;
+        tokenViewerA = resTokenViewer.key;
 
         const resTokenB = await jwtUtil.register({
             id: adminB.id,
@@ -115,17 +111,19 @@ describe("User CRUD & Multi-Tenant Authorization", () => {
         expect(res.status).toBe(401);
     });
 
-    it("should reject non-ADMIN role (e.g. MANAGER)", async () => {
+    it("rejects a VIEWER with 403 FORBIDDEN", async () => {
         const res = await app.handle(new Request("http://localhost/api/users", {
             method: "GET",
             headers: {
-                Authorization: `Bearer ${tokenManagerA}`,
+                Authorization: `Bearer ${tokenViewerA}`,
             },
         }));
         expect(res.status).toBe(403);
-        const data = (await res.json()) as ErrorResponse;
-        expect(data.status).toBe(false);
-        expect(data.message).toBe("Only ADMIN can access this resource");
+        expect(await readError(res)).toEqual({
+            code: "FORBIDDEN",
+            message: "Butuh role ADMIN",
+            details: null,
+        });
     });
 
     it("should create a user scoped to same tenant", async () => {
@@ -133,7 +131,7 @@ describe("User CRUD & Multi-Tenant Authorization", () => {
             fullName: "Staff A1",
             email: `staffA1_${Date.now()}@test.com`,
             password: "password123",
-            role: "MANAGER",
+            role: "VIEWER",
         };
 
         const res = await app.handle(new Request("http://localhost/api/users", {
@@ -146,10 +144,10 @@ describe("User CRUD & Multi-Tenant Authorization", () => {
         }));
 
         expect(res.status).toBe(201);
-        const created = (await res.json()) as UserResponse;
+        const created = await readData<UserResponse>(res);
         expect(created.fullName).toBe("Staff A1");
         expect(created.email).toBe(newUserPayload.email);
-        expect(created.role).toBe("MANAGER");
+        expect(created.role).toBe("VIEWER");
         expect(created.tenantId).toBe(tenantA.id);
         expect(created.hashPassword).toBeUndefined();
     });
@@ -162,7 +160,7 @@ describe("User CRUD & Multi-Tenant Authorization", () => {
             },
         }));
         expect(resA.status).toBe(200);
-        const listA = (await resA.json()) as UserResponse[];
+        const listA = await readData<UserResponse[]>(resA);
         expect(Array.isArray(listA)).toBe(true);
         expect(listA.length).toBeGreaterThanOrEqual(2);
         for (const u of listA) {
@@ -176,7 +174,7 @@ describe("User CRUD & Multi-Tenant Authorization", () => {
             },
         }));
         expect(resB.status).toBe(200);
-        const listB = (await resB.json()) as UserResponse[];
+        const listB = await readData<UserResponse[]>(resB);
         for (const u of listB) {
             expect(u.tenantId).toBe(tenantB.id);
         }
@@ -195,7 +193,7 @@ describe("User CRUD & Multi-Tenant Authorization", () => {
             },
         }));
         expect(resOk.status).toBe(200);
-        const detail = (await resOk.json()) as UserResponse;
+        const detail = await readData<UserResponse>(resOk);
         expect(detail.id).toBe(adminA.id);
         expect(detail.tenantId).toBe(tenantA.id);
 
@@ -210,10 +208,10 @@ describe("User CRUD & Multi-Tenant Authorization", () => {
 
     it("should update user in same tenant, but fail for user in other tenant", async () => {
         const updatePayload = {
-            fullName: "Manager A Updated",
+            fullName: "Viewer A Updated",
         };
 
-        const resOk = await app.handle(new Request(`http://localhost/api/users/${managerA.id}`, {
+        const resOk = await app.handle(new Request(`http://localhost/api/users/${viewerA.id}`, {
             method: "PUT",
             headers: {
                 "Content-Type": "application/json",
@@ -222,8 +220,8 @@ describe("User CRUD & Multi-Tenant Authorization", () => {
             body: JSON.stringify(updatePayload),
         }));
         expect(resOk.status).toBe(200);
-        const updated = (await resOk.json()) as UserResponse;
-        expect(updated.fullName).toBe("Manager A Updated");
+        const updated = await readData<UserResponse>(resOk);
+        expect(updated.fullName).toBe("Viewer A Updated");
 
         const resCross = await app.handle(new Request(`http://localhost/api/users/${adminB.id}`, {
             method: "PUT",
@@ -244,8 +242,11 @@ describe("User CRUD & Multi-Tenant Authorization", () => {
             },
         }));
         expect(res.status).toBe(400);
-        const data = (await res.json()) as ErrorResponse;
-        expect(data.message).toBe("Cannot delete your own account");
+        expect(await readError(res)).toEqual({
+            code: "VALIDATION_ERROR",
+            message: "Cannot delete your own account",
+            details: null,
+        });
     });
 
     it("should delete user in same tenant, and fail for user in other tenant", async () => {
@@ -257,14 +258,14 @@ describe("User CRUD & Multi-Tenant Authorization", () => {
         }));
         expect(resCross.status).toBe(404);
 
-        const resDelete = await app.handle(new Request(`http://localhost/api/users/${managerA.id}`, {
+        const resDelete = await app.handle(new Request(`http://localhost/api/users/${viewerA.id}`, {
             method: "DELETE",
             headers: {
                 Authorization: `Bearer ${tokenAdminA}`,
             },
         }));
         expect(resDelete.status).toBe(200);
-        const resCheck = await app.handle(new Request(`http://localhost/api/users/${managerA.id}`, {
+        const resCheck = await app.handle(new Request(`http://localhost/api/users/${viewerA.id}`, {
             method: "GET",
             headers: {
                 Authorization: `Bearer ${tokenAdminA}`,

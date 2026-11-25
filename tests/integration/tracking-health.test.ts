@@ -15,6 +15,7 @@ import {TrackingHealthService} from "@/modules/tracking-health/service";
 import {JwtUtil} from "@shared/jwt";
 import {todayInZone} from "@shared/dates";
 import {and, eq} from "drizzle-orm";
+import {readData, readError} from "../helpers";
 
 class TestCleanupRepository extends DatabaseRepository {
     async cleanup(tenantId: string): Promise<void> {
@@ -249,14 +250,18 @@ describe("Tracking health", () => {
             {headers}
         ));
         expect(response.status).toBe(200);
-        const body = await response.json();
-        expect(Array.isArray(body) === false && "events" in body ? body.events.length : -1).toBe(2);
+        const body = await readData<{events: unknown[]}>(response);
+        expect(body.events.length).toBe(2);
 
         const forbidden = await app.handle(new Request(
             `http://localhost/api/tracking-health?accountId=${otherAccountId}`,
             {headers}
         ));
         expect(forbidden.status).toBe(404);
-        expect(await forbidden.json()).toEqual({status: false, message: "Akun iklan tidak ditemukan"});
+        expect(await readError(forbidden)).toEqual({
+            code: "NOT_FOUND",
+            message: "Akun iklan tidak ditemukan",
+            details: null,
+        });
     });
 });

@@ -22,6 +22,7 @@ import type {LeadAssessmentQueue} from "@/modules/audience/queue";
 import type {WaCloudQueue} from "@/modules/wa/cloud/queue";
 import type {MessageReceived} from "@/modules/wa/webhook/schema";
 import {eq, sql} from "drizzle-orm";
+import {readData, readError} from "../helpers";
 
 class TestCleanupRepository extends DatabaseRepository {
     async cleanup(tenantId: string): Promise<void> {
@@ -180,7 +181,11 @@ describe("WhatsApp Cloud API ingestion", () => {
         }));
 
         expect(response.status).toBe(401);
-        expect(await response.json()).toEqual({status: false, message: "Webhook signature tidak valid"});
+        expect(await readError(response)).toEqual({
+            code: "UNAUTHORIZED",
+            message: "Webhook signature tidak valid",
+            details: null,
+        });
 
         const [row] = await db.execute(sql`
             select count(*)::int as total from conversation_messages where wamid = ${`wamid_bad_${u}`}
@@ -437,7 +442,7 @@ describe("WhatsApp Cloud API ingestion", () => {
         ));
 
         expect(response.status).toBe(200);
-        const body = await response.json() as {timed: {measuredLeads: number}};
+        const body = await readData<{timed: {measuredLeads: number}}>(response);
         expect(body.timed.measuredLeads).toBeGreaterThanOrEqual(1);
     });
 

@@ -1,6 +1,6 @@
 import {Elysia} from "elysia";
 import {JwtUtil} from "@shared/jwt";
-import {ForbiddenError} from "@shared/errors";
+import {requireAdmin} from "@shared/guards";
 import {UserService} from "@/modules/user/service";
 import {UserSchema} from "@/modules/user/schema";
 
@@ -15,11 +15,8 @@ export const UserController = new Elysia({
 })
     .decorate("userService", new UserService())
     .use(JwtUtil.isAuthenticated)
-    .onBeforeHandle(({user}) => {
-        if (user.role !== "ADMIN") {
-            throw new ForbiddenError("Only ADMIN can access this resource");
-        }
-    })
+    // The user directory itself is ADMIN-only, so the guard covers every route of this controller.
+    .use(requireAdmin)
     .get("/",
         async ({user, userService}) => userService.findAll(user.tenantId),
         {

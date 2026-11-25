@@ -1,7 +1,7 @@
 import {Elysia} from "elysia";
 import {JwtUtil} from "@shared/jwt";
-import {ForbiddenError} from "@shared/errors";
-import {AudienceService, resolveLeadPageSize} from "@/modules/audience/service";
+import {requireAdmin} from "@shared/guards";
+import {AudienceService} from "@/modules/audience/service";
 import {AudienceSchema} from "@/modules/audience/schema";
 
 export const AudienceController = new Elysia({
@@ -68,11 +68,9 @@ export const LeadController = new Elysia({
     .decorate("audienceService", new AudienceService())
     .use(JwtUtil.isAuthenticated)
     .get("/",
-        async ({user, query, audienceService}) => {
-            // Validated here so a bad page size is a 422 with its own code, not a generic validation error.
-            resolveLeadPageSize(query.pageSize ?? query.limit);
-            return audienceService.listLeads(user.tenantId, query);
-        },
+        // The service validates `page_size` before touching the database, so a bad size is its own
+        // 400 INVALID_PAGE_SIZE rather than a generic validation error.
+        async ({user, query, audienceService}) => audienceService.listLeads(user.tenantId, query),
         {
             query: AudienceSchema.leadList,
             detail: {
@@ -88,24 +86,7 @@ export const LeadController = new Elysia({
                 summary: "Get one lead with attribution, metrics, level timeline, and message trail"
             }
         })
-    .delete("/:id",
-        async ({user, params: {id}, query, audienceService}) => {
-            if (user.role !== "ADMIN") {
-                throw new ForbiddenError("Only ADMIN can delete a lead");
-            }
-
-            return audienceService.deleteLead(user.tenantId, Number(id), {
-                userId: user.iss,
-                reason: query.reason,
-            });
-        },
-        {
-            params: AudienceSchema.leadParams,
-            query: AudienceSchema.leadDelete,
-            detail: {
-                summary: "Delete a lead and its conversations, assessments, and milestones (ADMIN)"
-            }
-        })
+    // VIEWER may retag a lead, so it is registered before the ADMIN-only delete below.
     .patch("/:id",
         async ({user, params: {id}, body, audienceService}) =>
             audienceService.updateLead(user.tenantId, Number(id), body),
@@ -114,5 +95,19 @@ export const LeadController = new Elysia({
             body: AudienceSchema.leadUpdate,
             detail: {
                 summary: "Update a lead stage, temperature, or deal value"
+            }
+        })
+    .use(requireAdmin)
+    .delete("/:id",
+        async ({user, params: {id}, query, audienceService}) =>
+            audienceService.deleteLead(user.tenantId, Number(id), {
+                userId: user.iss,
+                reason: query.reason,
+            }),
+        {
+            params: AudienceSchema.leadParams,
+            query: AudienceSchema.leadDelete,
+            detail: {
+                summary: "Delete a lead and its conversations, assessments, and milestones (ADMIN)"
             }
         });

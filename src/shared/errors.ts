@@ -56,3 +56,30 @@ export class RateLimitError extends AppError {
         super(message, 429, code)
     }
 }
+
+/**
+ * Fallback `code` for an `AppError` that carries none: the client groups failures by this string, so
+ * every status must map to exactly one. `VALIDATION_ERROR` covers 400 because a 400 without a code is
+ * a payload the handler rejected.
+ */
+export function codeForStatus(status: number): string {
+    switch (status) {
+        case 400:
+            return "VALIDATION_ERROR"
+        case 401:
+            return "UNAUTHORIZED"
+        case 403:
+            return "FORBIDDEN"
+        case 404:
+            return "NOT_FOUND"
+        case 409:
+            return "CONFLICT"
+        case 422:
+            return "UNPROCESSABLE_ENTITY"
+        case 429:
+            return "RATE_LIMITED"
+        default:
+            return "INTERNAL_ERROR"
+    }
+}
+

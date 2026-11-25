@@ -15,6 +15,7 @@ import {ExplainWorkerProcessor, type ExplainModel} from "@/modules/explanations/
 import type {ExplainJobData, ExplainJobName} from "@/modules/explanations/queue";
 import type {Job} from "@infra/queue";
 import {and, eq} from "drizzle-orm";
+import {readData, readError} from "../helpers";
 
 class TestCleanupRepository extends DatabaseRepository {
     async cleanup(tenantId: string): Promise<void> {
@@ -243,7 +244,7 @@ describe("Explanations", () => {
             {headers: {authorization: `Bearer ${own.key}`}}
         ));
         expect(ownResponse.status).toBe(200);
-        const body = await ownResponse.json() as {id: string; context: string; nextCheck: string | null};
+        const body = await readData<{id: string; context: string; nextCheck: string | null}>(ownResponse);
         expect(body.id).toBe(row.id);
         expect(body.context).toBe("funnel_leak");
         expect(body.nextCheck).toBeNull();
@@ -253,6 +254,10 @@ describe("Explanations", () => {
             {headers: {authorization: `Bearer ${other.key}`}}
         ));
         expect(otherResponse.status).toBe(404);
-        expect(await otherResponse.json()).toEqual({status: false, message: "Penjelasan tidak ditemukan"});
+        expect(await readError(otherResponse)).toEqual({
+            code: "NOT_FOUND",
+            message: "Penjelasan tidak ditemukan",
+            details: null,
+        });
     });
 });

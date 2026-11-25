@@ -6,6 +6,7 @@ import {ConversationMessageEntity} from "@db/schema/wa/conversation-message.enti
 import {LeadMilestoneEntity} from "@db/schema/wa/lead-milestone.entity";
 import {DeletionAuditEntity} from "@db/schema/ads/deletion-audit.entity";
 import {and, asc, desc, eq, gte, ilike, isNull, lte, or, sql} from "drizzle-orm";
+import {DEFAULT_PAGE_SIZE} from "@shared/pagination";
 
 export type Lead = typeof LeadEntity.$inferSelect;
 export type InsertLead = typeof LeadEntity.$inferInsert;
@@ -79,7 +80,6 @@ export interface ManualLeadChanges {
     dealValueMinor?: number | null;
 }
 
-const DEFAULT_PAGE_SIZE = 20;
 const MAX_PAGE_SIZE = 100;
 
 /**

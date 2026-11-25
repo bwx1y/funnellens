@@ -1,4 +1,5 @@
 import {afterAll, beforeAll, describe, expect, it} from "bun:test";
+import {readData, readError} from "../helpers";
 import {app} from "@/index";
 import {db} from "@db/index";
 import {DatabaseRepository} from "@db/repositories/base.repository";
@@ -459,7 +460,7 @@ describe("Analytics funnel", () => {
         ));
 
         expect(response.status).toBe(200);
-        const body = await response.json() as {pairs: unknown[]; objectiveGroup: string};
+        const body = await readData<{pairs: unknown[]; objectiveGroup: string}>(response);
         expect(body.objectiveGroup).toBe("wa");
         expect(body.pairs.length).toBe(6);
     });
@@ -472,7 +473,7 @@ describe("Analytics funnel", () => {
         ));
 
         expect(response.status).toBe(200);
-        const body = await response.json() as {impactCaption: string};
+        const body = await readData<{impactCaption: string}>(response);
         expect(body.impactCaption).toBe("≈45 chat hilang");
     });
 
@@ -484,7 +485,7 @@ describe("Analytics funnel", () => {
         ));
 
         expect(response.status).toBe(200);
-        const body = await response.json() as {periods: unknown[]; stages: unknown[]};
+        const body = await readData<{periods: unknown[]; stages: unknown[]}>(response);
         expect(body.periods.length).toBe(2);
         expect(body.stages.length).toBe(7);
     });
@@ -497,7 +498,7 @@ describe("Analytics funnel", () => {
         ));
 
         expect(response.status).toBe(200);
-        const body = await response.json() as {comparisonTable: unknown[]};
+        const body = await readData<{comparisonTable: unknown[]}>(response);
         expect(body.comparisonTable.length).toBe(7);
     });
 
@@ -509,7 +510,11 @@ describe("Analytics funnel", () => {
         ));
 
         expect(response.status).toBe(400);
-        expect(await response.json()).toEqual({status: false, message: "Tahap funnel tidak dikenal"});
+        expect(await readError(response)).toEqual({
+            code: "VALIDATION_ERROR",
+            message: "Tahap funnel tidak dikenal",
+            details: null,
+        });
     });
 
     it("hides accounts owned by another tenant", async () => {
@@ -520,6 +525,10 @@ describe("Analytics funnel", () => {
         ));
 
         expect(response.status).toBe(404);
-        expect(await response.json()).toEqual({status: false, message: "Akun iklan tidak ditemukan"});
+        expect(await readError(response)).toEqual({
+            code: "NOT_FOUND",
+            message: "Akun iklan tidak ditemukan",
+            details: null,
+        });
     });
 });

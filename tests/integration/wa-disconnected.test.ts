@@ -39,7 +39,7 @@ describe("WaWebhookService.disconnected", () => {
         WaSessionRepository.prototype.update = async () => session;
         UserRepository.prototype.findAllByTenantId = async () => ([
             {id: "u1", fullName: "Admin", email: "admin@example.com", role: "ADMIN", verifiedAt: new Date(), tenantId: "t1"},
-            {id: "u2", fullName: "Manager", email: "manager@example.com", role: "MANAGER", verifiedAt: new Date(), tenantId: "t1"},
+            {id: "u2", fullName: "Viewer", email: "viewer@example.com", role: "VIEWER", verifiedAt: new Date(), tenantId: "t1"},
         ]);
         TenantRepository.prototype.findOneById = async () => tenant;
         // Reason: only `queue.add` is exercised; the fake never touches BullMQ's Job wrapper.

@@ -11,7 +11,7 @@ export const UserEntity = pgTable("users", {
     fullName: varchar("full_name", {length: 150}).notNull(),
     email: varchar("email", {length: 200}).unique().notNull(),
     hashPassword: varchar("hash_password").notNull(),
-    role: userRoleEnum("role").notNull().default("ADMIN"),
+    role: userRoleEnum("role").notNull().default("VIEWER"),
     verifiedAt: timestamp("verified_at", { withTimezone: true }),
     tenantId: uuid("tenant_id").references(() => TenantEntity.id).notNull(),
 });

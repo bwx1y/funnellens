@@ -18,6 +18,7 @@ import {LeadAssessmentEntity} from "@db/schema/wa/lead-assessment.entity";
 import {JwtUtil} from "@shared/jwt";
 import {and, eq} from "drizzle-orm";
 import {AudienceService} from "@/modules/audience/service";
+import {readData, readError} from "../helpers";
 
 class TestCleanupRepository extends DatabaseRepository {
     async cleanup(tenantId: string): Promise<void> {
@@ -674,15 +675,15 @@ describe("Audience intelligence", () => {
         const hot = await service.listLeads(tenantId, {accountId, temperature: "HOT"});
 
         expect(hot.total).toBe(3);
-        expect(hot.data.every((row) => row.campaignName === `Audience Campaign ${u}`)).toBe(true);
-        expect(hot.data.some((row) => row.confidence === "tinggi")).toBe(true);
-        expect(hot.data.every((row) => row.waitingMinutes === null)).toBe(true);
+        expect(hot.items.every((row) => row.campaignName === `Audience Campaign ${u}`)).toBe(true);
+        expect(hot.items.some((row) => row.confidence === "tinggi")).toBe(true);
+        expect(hot.items.every((row) => row.waitingMinutes === null)).toBe(true);
 
         const all = await service.listLeads(tenantId, {accountId, pageSize: "15"});
         expect(all.total).toBe(8);
-        expect(all.data.find((row) => row.id === l3.id)?.waitingMinutes).toBeGreaterThan(0);
-        expect(all.data.find((row) => row.id === l1.id)?.waitingMinutes).toBeNull();
-        const unassessed = all.data.find((row) => row.id === l8.id);
+        expect(all.items.find((row) => row.id === l3.id)?.waitingMinutes).toBeGreaterThan(0);
+        expect(all.items.find((row) => row.id === l1.id)?.waitingMinutes).toBeNull();
+        const unassessed = all.items.find((row) => row.id === l8.id);
         expect(unassessed?.temperature).toBeNull();
         expect(unassessed?.confidence).toBeNull();
         expect(unassessed?.campaignName).toBeNull();
@@ -695,7 +696,7 @@ describe("Audience intelligence", () => {
         expect(first.pageSize).toBe(5);
         expect(first.total).toBe(8);
         expect(first.pages).toBe(2);
-        expect(first.data.length).toBe(5);
+        expect(first.items.length).toBe(5);
         expect(first.counts).toEqual({cold: 1, warm: 3, hot: 3, total: 7});
         expect(first.counts.cold + first.counts.warm + first.counts.hot).toBe(first.counts.total);
 
@@ -707,7 +708,7 @@ describe("Audience intelligence", () => {
             until: UNTIL,
         });
         expect(clamped.page).toBe(2);
-        expect(clamped.data.length).toBe(3);
+        expect(clamped.items.length).toBe(3);
 
         // `search` narrows the page, never the level counts.
         const searched = await service.listLeads(tenantId, {
@@ -731,24 +732,24 @@ describe("Audience intelligence", () => {
             dir: "asc",
         });
 
-        expect(result.data.map((row) => row.temperature)).toEqual([
+        expect(result.items.map((row) => row.temperature)).toEqual([
             "COLD", "WARM", "WARM", "WARM", "HOT", "HOT", "HOT", null,
         ]);
-        expect(result.data[result.data.length - 1].id).toBe(l8.id);
+        expect(result.items[result.items.length - 1].id).toBe(l8.id);
     });
 
-    it("rejects a page size outside 5, 10, and 15 with 422", async () => {
+    it("rejects a page size outside the allowed set with 400", async () => {
         const token = await new JwtUtil().register({id: "user-audience", tenant: tenantId, role: "ADMIN"});
         const response = await app.handle(new Request(
-            `http://localhost/api/leads?accountId=${accountId}&pageSize=7`,
+            `http://localhost/api/leads?accountId=${accountId}&page_size=7`,
             {headers: {authorization: `Bearer ${token.key}`}}
         ));
 
-        expect(response.status).toBe(422);
-        expect(await response.json()).toEqual({
-            status: false,
-            message: "pageSize harus 5, 10, atau 15",
+        expect(response.status).toBe(400);
+        expect(await readError(response)).toEqual({
             code: "INVALID_PAGE_SIZE",
+            message: "page_size tidak valid",
+            details: null,
         });
     });
 
@@ -801,9 +802,9 @@ describe("Audience intelligence", () => {
             {headers}
         ));
         expect(pipelineResponse.status).toBe(200);
-        const pipelineBody = await pipelineResponse.json() as {
+        const pipelineBody = await readData<{
             lanes: {level: string; count: number; rows: unknown[]}[];
-        };
+        }>(pipelineResponse);
         expect(pipelineBody.lanes.length).toBe(2);
         expect(pipelineBody.lanes.every((lane) => lane.rows.length > 0 && lane.count >= lane.rows.length)).toBe(true);
 
@@ -812,13 +813,13 @@ describe("Audience intelligence", () => {
             {headers}
         ));
         expect(listResponse.status).toBe(200);
-        const listBody = await listResponse.json() as {
-            pageSize: number;
-            pages: number;
+        const listBody = await readData<{
+            items: unknown[];
+            meta: {page_size: number; pages: number};
             counts: {total: number};
-        };
-        expect(listBody.pageSize).toBe(15);
-        expect(listBody.pages).toBe(1);
+        }>(listResponse);
+        expect(listBody.meta.page_size).toBe(15);
+        expect(listBody.meta.pages).toBe(1);
         expect(listBody.counts.total).toBe(7);
 
         const patchResponse = await app.handle(new Request(
@@ -830,7 +831,7 @@ describe("Audience intelligence", () => {
             }
         ));
         expect(patchResponse.status).toBe(200);
-        const patchBody = await patchResponse.json() as {stage: string; manualAssessmentId: string | null};
+        const patchBody = await readData<{stage: string; manualAssessmentId: string | null}>(patchResponse);
         expect(patchBody.stage).toBe("REPLIED");
         expect(patchBody.manualAssessmentId).toBeNull();
     });
@@ -848,9 +849,10 @@ describe("Audience intelligence", () => {
             {headers: {authorization: `Bearer ${token.key}`}}
         ));
         expect(audienceResponse.status).toBe(404);
-        expect(await audienceResponse.json()).toEqual({
-            status: false,
+        expect(await readError(audienceResponse)).toEqual({
+            code: "NOT_FOUND",
             message: "Akun iklan tidak ditemukan",
+            details: null,
         });
 
         const patchResponse = await app.handle(new Request(
@@ -865,6 +867,10 @@ describe("Audience intelligence", () => {
             }
         ));
         expect(patchResponse.status).toBe(404);
-        expect(await patchResponse.json()).toEqual({status: false, message: "Lead tidak ditemukan"});
+        expect(await readError(patchResponse)).toEqual({
+            code: "NOT_FOUND",
+            message: "Lead tidak ditemukan",
+            details: null,
+        });
     });
 });

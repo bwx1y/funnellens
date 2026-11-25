@@ -31,6 +31,7 @@ import {MetaTokenRefreshService} from "@/modules/meta/token-refresh.service";
 import {PurchaseReconciliationService} from "@/modules/reports/reconciliation.service";
 import {CloudIngestService} from "@/modules/wa/cloud/service";
 import {and, eq, sql} from "drizzle-orm";
+import {readData, readError} from "../helpers";
 
 class TestCleanupRepository extends DatabaseRepository {
     async cleanup(tenantId: string): Promise<void> {
@@ -116,7 +117,7 @@ describe("Ingestion hardening", () => {
 
         // The API surface never returns the token at all.
         const response = await request("/api/meta/connection");
-        const body = await response.json() as Record<string, unknown>;
+        const body = await readData<Record<string, unknown>>(response);
         expect(response.status).toBe(200);
         expect(JSON.stringify(body)).not.toContain("EAAB-plain-token");
         expect(JSON.stringify(body)).not.toContain("v1:");
@@ -251,7 +252,7 @@ describe("Ingestion hardening", () => {
 
     it("reports a connected-but-never-synced source as simulation, then connected", async () => {
         const before = await request("/api/sources");
-        const beforeBody = await before.json() as {sources: {key: string; status: string; lastSyncAt: string | null}[]};
+        const beforeBody = await readData<{sources: {key: string; status: string; lastSyncAt: string | null}[]}>(before);
         const metaBefore = beforeBody.sources.find((source) => source.key === "meta");
 
         expect(before.status).toBe(200);
@@ -267,7 +268,7 @@ describe("Ingestion hardening", () => {
         });
 
         const after = await request("/api/sources");
-        const afterBody = await after.json() as {sources: {key: string; status: string; lastSyncAt: string | null}[]};
+        const afterBody = await readData<{sources: {key: string; status: string; lastSyncAt: string | null}[]}>(after);
         const metaAfter = afterBody.sources.find((source) => source.key === "meta");
 
         expect(metaAfter?.status).toBe("connected");
@@ -282,9 +283,9 @@ describe("Ingestion hardening", () => {
         expect(sourceStatusOf({configured: true, inScope: false})).toBe("out_of_scope");
 
         const settings = await request("/api/settings");
-        const body = await settings.json() as {sources: {key: string; status: string}[]};
+        const body = await readData<{sources: {key: string; status: string}[]}>(settings);
         const sources = await request("/api/sources");
-        const sourcesBody = await sources.json() as {sources: {key: string; status: string}[]};
+        const sourcesBody = await readData<{sources: {key: string; status: string}[]}>(sources);
 
         expect(body.sources.map((source) => [source.key, source.status]))
             .toEqual(sourcesBody.sources.map((source) => [source.key, source.status]));
@@ -374,7 +375,7 @@ describe("Ingestion hardening", () => {
             body: JSON.stringify({date: "2026-11-15", orders: 100, revenueMinor: 5_000_000}),
         });
         expect(recorded.status).toBe(200);
-        expect(await recorded.json()).toEqual({date: "2026-11-15", orders: 100, revenueMinor: 5_000_000});
+        expect(await readData(recorded)).toEqual({date: "2026-11-15", orders: 100, revenueMinor: 5_000_000});
 
         // Meta attributed 92 purchases on that day: the gap is 8.
         const [ad] = await db.select().from(AdEntity).where(eq(AdEntity.id, `ad_web_${u}`));
@@ -408,7 +409,7 @@ describe("Ingestion hardening", () => {
         });
 
         const health = await request(`/api/tracking-health?accountId=${accountId}`);
-        const body = await health.json() as {reconciliation: {date: string; difference: number}[]};
+        const body = await readData<{reconciliation: {date: string; difference: number}[]}>(health);
         expect(health.status).toBe(200);
         expect(body.reconciliation.find((row) => row.date === "2026-11-15")?.difference).toBe(8);
     });
@@ -452,8 +453,8 @@ describe("Ingestion hardening", () => {
         expect(message.conversationId).not.toBeNull();
 
         const list = await request(`/api/leads?accountId=${accountId}`);
-        const listBody = await list.json() as {data: {attribution: {method: string; confidence: string}}[]};
-        expect(listBody.data.some((row) => row.attribution.method === "unknown")).toBe(true);
+        const listBody = await readData<{items: {attribution: {method: string; confidence: string}}[]}>(list);
+        expect(listBody.items.some((row) => row.attribution.method === "unknown")).toBe(true);
     });
 
     it("deletes a lead with its history and records the erasure", async () => {
@@ -483,7 +484,7 @@ describe("Ingestion hardening", () => {
         const response = await request(`/api/leads/${lead.id}?reason=permintaan%20pelanggan`, {method: "DELETE"});
 
         expect(response.status).toBe(200);
-        expect(await response.json()).toEqual({deleted: true, leadId: lead.id});
+        expect(await readData(response)).toEqual({deleted: true, leadId: lead.id});
 
         expect(await db.select().from(LeadEntity).where(eq(LeadEntity.id, lead.id))).toHaveLength(0);
         expect(await db.select().from(ConversationMessageEntity).where(eq(ConversationMessageEntity.leadId, lead.id)))
@@ -502,15 +503,15 @@ describe("Ingestion hardening", () => {
         expect(again.status).toBe(404);
     });
 
-    it("refuses a lead deletion for a non-admin user", async () => {
-        const manager = await userRepo.create({
-            fullName: "Manager",
-            email: `hardening-manager-${u}@funnellens.test`,
+    it("refuses a lead deletion for a VIEWER", async () => {
+        const viewer = await userRepo.create({
+            fullName: "Viewer",
+            email: `hardening-viewer-${u}@funnellens.test`,
             hashPassword: "hash",
-            role: "MANAGER",
+            role: "VIEWER",
             tenantId,
         });
-        const managerToken = await new JwtUtil().register({id: manager.id, tenant: tenantId, role: "MANAGER"});
+        const viewerToken = await new JwtUtil().register({id: viewer.id, tenant: tenantId, role: "VIEWER"});
         const [lead] = await db.insert(LeadEntity).values({
             accountId,
             externalId: `manager-${u}`,
@@ -518,9 +519,14 @@ describe("Ingestion hardening", () => {
             stage: "CHAT_STARTED",
         }).returning();
 
-        const response = await request(`/api/leads/${lead.id}`, {method: "DELETE"}, managerToken);
+        const response = await request(`/api/leads/${lead.id}`, {method: "DELETE"}, viewerToken);
 
         expect(response.status).toBe(403);
+        expect(await readError(response)).toEqual({
+            code: "FORBIDDEN",
+            message: "Butuh role ADMIN",
+            details: null,
+        });
         expect(await db.select().from(LeadEntity).where(eq(LeadEntity.id, lead.id))).toHaveLength(1);
     });
 

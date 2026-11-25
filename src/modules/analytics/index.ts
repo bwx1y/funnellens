@@ -15,7 +15,9 @@ export const AnalyticsController = new Elysia({
     .decorate("analyticsService", new AnalyticsService())
     .use(JwtUtil.isAuthenticated)
     .get("/summary",
-        async ({user, query, analyticsService}) => analyticsService.getSummary(user.tenantId, query),
+        // `request` lets the service flag a cache hit, which the envelope reports as `meta.cached`.
+        async ({user, query, analyticsService, request}) =>
+            analyticsService.getSummary(user.tenantId, query, request),
         {
             query: AnalyticsSchema.summary,
             detail: {
@@ -23,7 +25,8 @@ export const AnalyticsController = new Elysia({
             }
         })
     .get("/funnel",
-        async ({user, query, analyticsService}) => analyticsService.getFunnel(user.tenantId, query),
+        async ({user, query, analyticsService, request}) =>
+            analyticsService.getFunnel(user.tenantId, query, request),
         {
             query: AnalyticsSchema.funnel,
             detail: {
@@ -39,7 +42,8 @@ export const AnalyticsController = new Elysia({
             }
         })
     .get("/leakage",
-        async ({user, query, analyticsService}) => analyticsService.getLeakage(user.tenantId, query),
+        async ({user, query, analyticsService, request}) =>
+            analyticsService.getLeakage(user.tenantId, query, request),
         {
             query: AnalyticsSchema.leakage,
             detail: {

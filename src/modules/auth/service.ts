@@ -66,10 +66,12 @@ export class AuthService {
             address: body.tenant.address
         })
         const hashPassword = await PasswordUtil.hash(body.confirmPassword)
+        // Registration always provisions a fresh tenant, so this caller is its first user and owns it.
         const entityUser = await this.userRepository.create({
             fullName: body.fullName,
             email: body.email,
             hashPassword: hashPassword,
+            role: "ADMIN",
             tenantId: entityTenant.id,
         });
 

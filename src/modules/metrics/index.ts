@@ -1,6 +1,6 @@
 import {Elysia} from "elysia";
 import {JwtUtil} from "@shared/jwt";
-import {ForbiddenError} from "@shared/errors";
+import {requireAdmin} from "@shared/guards";
 import {renderMetrics} from "@infra/metrics";
 
 /**
@@ -17,11 +17,7 @@ export const MetricsController = new Elysia({
     }
 })
     .use(JwtUtil.isAuthenticated)
-    .onBeforeHandle(({user}) => {
-        if (user.role !== "ADMIN") {
-            throw new ForbiddenError("Only ADMIN can access this resource");
-        }
-    })
+    .use(requireAdmin)
     .get("/",
         ({set}) => {
             set.headers["content-type"] = "text/plain; version=0.0.4; charset=utf-8";

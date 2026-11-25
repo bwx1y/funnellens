@@ -14,6 +14,12 @@ export const AlertsSchema = {
     list: t.Object({
         accountId,
         status: statusFilter,
+        page: t.Optional(t.String({
+            description: "1-based page number, defaults to 1 and clamped to the last page",
+        })),
+        page_size: t.Optional(t.String({
+            description: "Page size: 5, 10, 15, 20, 50, or 100 (default 10); any other value returns 400 INVALID_PAGE_SIZE",
+        })),
     }),
     badge: t.Object({
         accountId,

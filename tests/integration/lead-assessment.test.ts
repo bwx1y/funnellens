@@ -1,4 +1,5 @@
 import {afterAll, beforeAll, describe, expect, it} from "bun:test";
+import {readData} from "../helpers";
 import {app} from "@/index";
 import {db} from "@db/index";
 import {DatabaseRepository} from "@db/repositories/base.repository";
@@ -547,11 +548,11 @@ describe("Lead assessment pipeline", () => {
         ));
 
         expect(response.status).toBe(200);
-        const body = await response.json() as {
+        const body = await readData<{
             counts: {responseType: string; count: number}[];
             classifiedLeads: number;
             sentiment: {negatif: number};
-        };
+        }>(response);
         const countOf = (responseType: string) =>
             body.counts.find((row) => row.responseType === responseType)?.count;
 
@@ -610,10 +611,10 @@ describe("Lead assessment pipeline", () => {
         ));
 
         expect(response.status).toBe(200);
-        const body = await response.json() as {
+        const body = await readData<{
             timed: {medianSeconds: number | null; measuredLeads: number; observedLeads: number};
             sample: {gate: string};
-        };
+        }>(response);
 
         expect(body.timed).toEqual({medianSeconds: 1200, measuredLeads: 2, observedLeads: 4});
         expect(body.sample.gate).toBe("≥ 30 chat");

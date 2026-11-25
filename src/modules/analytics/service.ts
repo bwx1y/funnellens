@@ -11,6 +11,7 @@ import {BadRequestError} from "@shared/errors";
 import {bucketIndex, addDays, dateRange, dayCount, endOfDayUtc, startOfDayUtc} from "@shared/dates";
 import {direction, round4, type DeltaDirection} from "@shared/numbers";
 import {isPartialDay, periodLabel, resolvePeriod} from "@shared/period";
+import {markCacheHit} from "@shared/request-context";
 import {funnelHealth, type FunnelHealthResult, type HealthBadge} from "@shared/health";
 import {ExplanationService, type ExplanationRef} from "@/modules/explanations/service";
 import {formatMoney, formatNumber, formatPercent} from "@/modules/explanations/rules";
@@ -341,10 +342,19 @@ export class AnalyticsService {
      * happens before the account scope check — a second identical call must not reach Postgres at all.
      * `getStageDetail` is deliberately absent: `stageKey` multiplies the key space for little reuse.
      */
-    private async cached<T>(endpoint: string, tenantId: string, query: CacheableQuery, build: () => Promise<T>): Promise<T> {
+    private async cached<T>(
+        endpoint: string,
+        tenantId: string,
+        query: CacheableQuery,
+        build: () => Promise<T>,
+        request?: Request
+    ): Promise<T> {
         const key = this.cache.key({endpoint, tenantId, ...query});
         const hit = await this.cache.get<T>(key);
-        if (hit !== null) return hit;
+        if (hit !== null) {
+            if (request !== undefined) markCacheHit(request);
+            return hit;
+        }
 
         const value = await build();
         await this.cache.set(key, value, AGGREGATION_CACHE_TTL_SECONDS);
@@ -352,8 +362,8 @@ export class AnalyticsService {
         return value;
     }
 
-    async getSummary(tenantId: string, query: SummaryQuery): Promise<SummaryResponse> {
-        return this.cached("summary", tenantId, query, () => this.buildSummary(tenantId, query));
+    async getSummary(tenantId: string, query: SummaryQuery, request?: Request): Promise<SummaryResponse> {
+        return this.cached("summary", tenantId, query, () => this.buildSummary(tenantId, query), request);
     }
 
     private async buildSummary(tenantId: string, query: SummaryQuery): Promise<SummaryResponse> {
@@ -626,8 +636,8 @@ export class AnalyticsService {
         };
     }
 
-    async getFunnel(tenantId: string, query: FunnelQuery): Promise<FunnelResponse> {
-        return this.cached("funnel", tenantId, query, () => this.buildFunnel(tenantId, query));
+    async getFunnel(tenantId: string, query: FunnelQuery, request?: Request): Promise<FunnelResponse> {
+        return this.cached("funnel", tenantId, query, () => this.buildFunnel(tenantId, query), request);
     }
 
     private async buildFunnel(tenantId: string, query: FunnelQuery): Promise<FunnelResponse> {
@@ -699,8 +709,8 @@ export class AnalyticsService {
         return response;
     }
 
-    async getLeakage(tenantId: string, query: LeakageQuery): Promise<LeakageResponse> {
-        return this.cached("leakage", tenantId, query, () => this.buildLeakage(tenantId, query));
+    async getLeakage(tenantId: string, query: LeakageQuery, request?: Request): Promise<LeakageResponse> {
+        return this.cached("leakage", tenantId, query, () => this.buildLeakage(tenantId, query), request);
     }
 
     private async buildLeakage(tenantId: string, query: LeakageQuery): Promise<LeakageResponse> {

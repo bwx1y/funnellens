@@ -25,6 +25,7 @@ import {InsightAlertEntity} from "@db/schema/ads/insight-alert.entity";
 import {QueueManager, WorkerManager} from "@infra/queue";
 import {JwtUtil} from "@shared/jwt";
 import {and, eq} from "drizzle-orm";
+import {readData, readError} from "../helpers";
 
 class TestCleanupRepository extends DatabaseRepository {
     async cleanup(tenantId: string): Promise<void> {
@@ -246,10 +247,10 @@ describe("Production operations", () => {
 
         expect(last?.status).toBe(429);
         expect(last?.headers.get("retry-after")).toMatch(/^\d+$/);
-        expect(await last?.json()).toEqual({
-            status: false,
-            message: "Batas 120 permintaan per menit terlampaui",
+        expect(await readError(last as Response)).toEqual({
             code: "RATE_LIMITED",
+            message: "Batas 120 permintaan per menit terlampaui",
+            details: null,
         });
 
         // The probe must still answer while the budget is spent.
@@ -286,10 +287,10 @@ describe("Production operations", () => {
             body: JSON.stringify({temperature: "COLD"}),
         }, token);
         expect(conflict.status).toBe(409);
-        expect(await conflict.json()).toEqual({
-            status: false,
-            message: "Idempotency-Key dipakai dengan body berbeda",
+        expect(await readError(conflict)).toEqual({
             code: "IDEMPOTENCY_CONFLICT",
+            message: "Idempotency-Key dipakai dengan body berbeda",
+            details: null,
         });
 
         // The rejected body never reached the handler, so the stored write is still the first one.
@@ -428,7 +429,7 @@ describe("Production operations", () => {
 
         expect(entry.attemptsMade).toBe(5);
         const listed = await request("/api/meta/queue/dlq", {}, token);
-        const rows = await listed.json() as {id: string; jobName: string; error: string; attemptsMade: number}[];
+        const rows = await readData<{id: string; jobName: string; error: string; attemptsMade: number}[]>(listed);
 
         expect(listed.status).toBe(200);
         const stored = rows.find((row) => row.jobName === "sync-daily" && row.error === "Rate limit reached");
@@ -442,7 +443,7 @@ describe("Production operations", () => {
 
         const removed = await request(`/api/meta/queue/dlq/${stored?.id}`, {method: "DELETE"}, token);
         expect(removed.status).toBe(200);
-        expect(await removed.json()).toEqual({deleted: true, id: stored?.id});
+        expect(await readData(removed)).toEqual({deleted: true, id: stored?.id});
 
         const again = await request(`/api/meta/queue/dlq/${stored?.id}`, {method: "DELETE"}, token);
         expect(again.status).toBe(404);

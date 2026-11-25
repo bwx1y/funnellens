@@ -1,5 +1,6 @@
 import {Elysia} from "elysia";
 import {JwtUtil} from "@shared/jwt";
+import {requireAdmin} from "@shared/guards";
 import {WaSessionService} from "@/modules/wa/session/service";
 import {WaSessionSchema} from "@/modules/wa/session/schema";
 
@@ -37,6 +38,8 @@ export const WaSessionController = new Elysia({
                 summary: "Get QR code for session login"
             }
         })
+    // Opening, reconfiguring, and closing a WhatsApp session are ADMIN actions; the reads stay open.
+    .use(requireAdmin)
     .post("/",
         async ({user, body, waSessionService, set}) => {
             const result = await waSessionService.create(user.tenantId, body);

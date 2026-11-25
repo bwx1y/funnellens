@@ -17,7 +17,7 @@ export const UserSchema = {
         }),
         role: t.Optional(t.Union([
             t.Literal("ADMIN"),
-            t.Literal("MANAGER")
+            t.Literal("VIEWER")
         ]))
     }),
     update: t.Object({
@@ -36,7 +36,7 @@ export const UserSchema = {
         })),
         role: t.Optional(t.Union([
             t.Literal("ADMIN"),
-            t.Literal("MANAGER")
+            t.Literal("VIEWER")
         ]))
     }),
     params: t.Object({

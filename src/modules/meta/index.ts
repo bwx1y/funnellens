@@ -4,7 +4,8 @@ import {MetaService} from "@/modules/meta/service";
 import {MetaSchema} from "@/modules/meta/schema";
 import {MetaSyncQueue} from "@/modules/meta/queue";
 import {MetaSyncDlq} from "@/modules/meta/dlq";
-import {ForbiddenError, NotFoundError} from "@shared/errors";
+import {NotFoundError} from "@shared/errors";
+import {requireAdmin} from "@shared/guards";
 
 const metaService = new MetaService();
 const metaSyncQueue = new MetaSyncQueue();
@@ -50,13 +51,6 @@ export const MetaController = new Elysia({
                 summary: "Get current user Meta connection"
             }
         })
-    .delete("/connection",
-        async ({user}) => metaService.disconnect(user.iss),
-        {
-            detail: {
-                summary: "Disconnect Meta connection"
-            }
-        })
     .get("/accounts",
         async ({user}) => metaService.listAccounts(user),
         {
@@ -71,12 +65,29 @@ export const MetaController = new Elysia({
                 summary: "Get currently selected Meta ad account"
             }
         })
+    .get("/insights/non-additive",
+        async ({user, query}) => metaService.getNonAdditiveMetrics(user, query),
+        {
+            query: MetaSchema.nonAdditiveMetrics,
+            detail: {
+                summary: "Get server-side deduplicated non-additive metrics (reach, frequency) from Meta"
+            }
+        })
+    // Everything below mutates the workspace's Meta connection or enqueues sync work.
+    .use(requireAdmin)
+    .delete("/connection",
+        async ({user}) => metaService.disconnect(user.iss),
+        {
+            detail: {
+                summary: "Disconnect Meta connection (ADMIN)"
+            }
+        })
     .post("/accounts/select",
         async ({user, body}) => metaService.selectAccount(user, body),
         {
             body: MetaSchema.selectAccount,
             detail: {
-                summary: "Select active Meta ad account for workspace"
+                summary: "Select active Meta ad account for workspace (ADMIN)"
             }
         })
     .post("/sync/master",
@@ -93,14 +104,6 @@ export const MetaController = new Elysia({
             body: MetaSchema.syncInsights,
             detail: {
                 summary: "Synchronize daily ads insights, actions, and breakdowns"
-            }
-        })
-    .get("/insights/non-additive",
-        async ({user, query}) => metaService.getNonAdditiveMetrics(user, query),
-        {
-            query: MetaSchema.nonAdditiveMetrics,
-            detail: {
-                summary: "Get server-side deduplicated non-additive metrics (reach, frequency) from Meta"
             }
         })
     .post("/queue/sync-daily",
@@ -150,24 +153,14 @@ export const MetaController = new Elysia({
             }
         })
     .get("/queue/dlq",
-        async ({user}) => {
-            if (user.role !== "ADMIN") {
-                throw new ForbiddenError("Only ADMIN can access this resource");
-            }
-
-            return metaSyncDlq.list();
-        },
+        async () => metaSyncDlq.list(),
         {
             detail: {
                 summary: "List the last 50 dead-lettered Meta sync jobs"
             }
         })
     .delete("/queue/dlq/:id",
-        async ({user, params: {id}}) => {
-            if (user.role !== "ADMIN") {
-                throw new ForbiddenError("Only ADMIN can access this resource");
-            }
-
+        async ({params: {id}}) => {
             const removed = await metaSyncDlq.remove(id);
             if (!removed) throw new NotFoundError("Entri DLQ tidak ditemukan");
 

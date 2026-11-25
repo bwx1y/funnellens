@@ -2,7 +2,7 @@ import {AdAccountRepository} from "@db/repositories/ad-account.repository";
 import {TenantRepository} from "@db/repositories/tenant.repository";
 import {UnauthorizedError} from "@shared/errors";
 import {MIN_COMPARATORS} from "@shared/creative";
-import {DEFAULT_PAGE_SIZE} from "@shared/audience";
+import {DEFAULT_PAGE_SIZE} from "@shared/pagination";
 import {PERIOD_DAYS} from "@shared/period";
 import {MAX_SEARCH_RESULTS} from "@/modules/search/service";
 import {SourcesService} from "@/modules/sources/service";

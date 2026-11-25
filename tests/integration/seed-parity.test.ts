@@ -4,6 +4,7 @@ import {JwtUtil} from "@shared/jwt";
 import {seedDemo} from "../../scripts/seed-demo";
 import {Config} from "@/config";
 import postgres from "postgres";
+import {readData} from "../helpers";
 
 const DEMO_TENANT_ID = "00000000-0000-4000-8000-000000000001";
 const DEMO_ACCOUNT_ID = "act_demo_funnellens";
@@ -51,7 +52,7 @@ describe.skipIf(!dbUp)("Seed parity golden test", () => {
         ));
         expect(response.status).toBe(200);
 
-        const data = await response.json();
+        const data = await readData<any>(response);
         // 8 WA ads * 2 messaging_started per day * 30 days = 480 messaging started
         expect(data.cards.leads.value).toBe(480);
         expect(data.campaigns.length).toBe(3);
@@ -64,7 +65,7 @@ describe.skipIf(!dbUp)("Seed parity golden test", () => {
         ));
         expect(response.status).toBe(200);
 
-        const data = await response.json();
+        const data = await readData<any>(response);
         expect(data.stages.length).toBe(7);
         expect(data.stages[0].key).toBe("impressions");
     });
@@ -76,7 +77,7 @@ describe.skipIf(!dbUp)("Seed parity golden test", () => {
         ));
         expect(response.status).toBe(200);
 
-        const data = await response.json();
+        const data = await readData<any>(response);
         expect(data.creatives.length).toBe(11);
     });
 
@@ -87,7 +88,7 @@ describe.skipIf(!dbUp)("Seed parity golden test", () => {
         ));
         expect(response.status).toBe(200);
 
-        const data = await response.json();
+        const data = await readData<any>(response);
         expect(data.total).toBe(8);
         const hot = data.distribution.find((d: any) => d.temperature === "hot")?.count;
         const warm = data.distribution.find((d: any) => d.temperature === "warm")?.count;
@@ -102,7 +103,7 @@ describe.skipIf(!dbUp)("Seed parity golden test", () => {
         ));
         expect(response.status).toBe(200);
 
-        const data = await response.json();
+        const data = await readData<any>(response);
         expect(data.counts.length).toBe(7);
         expect(data.timed.medianSeconds).toBe(1440);
     });
@@ -114,7 +115,7 @@ describe.skipIf(!dbUp)("Seed parity golden test", () => {
         ));
         expect(response.status).toBe(200);
 
-        const data = await response.json();
+        const data = await readData<any>(response);
         expect(data.alerts.length).toBe(3);
 
         const badgeRes = await app.handle(new Request(
@@ -122,7 +123,7 @@ describe.skipIf(!dbUp)("Seed parity golden test", () => {
             {headers}
         ));
         expect(badgeRes.status).toBe(200);
-        const badgeData = await badgeRes.json();
+        const badgeData = await readData<any>(badgeRes);
         expect(badgeData.count).toBe(3);
     });
 });

@@ -1,5 +1,6 @@
 import {Elysia} from "elysia";
 import {JwtUtil} from "@shared/jwt";
+import {requireAdmin} from "@shared/guards";
 import {csvResponse} from "@shared/csv";
 import {
     CAMPAIGNS_REPORT,
@@ -64,6 +65,16 @@ export const ReportsController = new Elysia({
                 summary: "Download per-campaign spend and results as CSV"
             }
         })
+    .get("/exports",
+        async ({user, query, reportsService}) => reportsService.listExports(user.tenantId, query),
+        {
+            query: ReportsSchema.exports,
+            detail: {
+                summary: "Paginate the tenant's recorded CSV exports"
+            }
+        })
+    // Writing the business's own numbers is an ADMIN action; the downloads above stay open to VIEWER.
+    .use(requireAdmin)
     .post("/recorded-orders",
         async ({user, query, body, reconciliationService}) =>
             reconciliationService.recordOrders(user.tenantId, query.accountId, body),
@@ -71,14 +82,6 @@ export const ReportsController = new Elysia({
             query: ReportsSchema.recordedOrdersQuery,
             body: ReportsSchema.recordedOrders,
             detail: {
-                summary: "Record the orders the business actually booked for one day"
-            }
-        })
-    .get("/exports",
-        async ({user, query, reportsService}) => reportsService.listExports(user.tenantId, query),
-        {
-            query: ReportsSchema.exports,
-            detail: {
-                summary: "List the tenant's last 50 CSV exports"
+                summary: "Record the orders the business actually booked for one day (ADMIN)"
             }
         });

@@ -17,6 +17,7 @@ import {JwtUtil} from "@shared/jwt";
 import {eq} from "drizzle-orm";
 import {CreativeService} from "@/modules/creative/service";
 import {AnalyticsService} from "@/modules/analytics/service";
+import {readData, readError} from "../helpers";
 
 class TestCleanupRepository extends DatabaseRepository {
     /**
@@ -185,11 +186,11 @@ describe("Reports and export", () => {
         ));
 
         expect(response.status).toBe(200);
-        const body = await response.json() as {
+        const body = await readData<{
             metric: string;
             current: {date: string; value: number | null}[];
             previous: {date: string; value: number | null}[];
-        };
+        }>(response);
         expect(body.metric).toBe("ctr");
         expect(body.current.length).toBe(7);
         expect(body.previous.length).toBe(7);
@@ -200,10 +201,10 @@ describe("Reports and export", () => {
             {headers: {authorization: `Bearer ${token.key}`}}
         ));
         expect(invalid.status).toBe(400);
-        expect(await invalid.json()).toEqual({
-            status: false,
-            message: "days harus 7, 14, atau 30",
+        expect(await readError(invalid)).toEqual({
             code: "INVALID_DAYS",
+            message: "days harus 7, 14, atau 30",
+            details: null,
         });
     });
 
@@ -336,16 +337,21 @@ describe("Reports and export", () => {
         ));
 
         expect(exportsResponse.status).toBe(200);
-        const body = await exportsResponse.json() as {
-            id: number;
-            report: string;
-            filter: Record<string, unknown>;
-            rowCount: number;
-            userName: string | null;
-            createdAt: string;
-        }[];
+        const listing = await readData<{
+            items: {
+                id: number;
+                report: string;
+                filter: Record<string, unknown>;
+                rowCount: number;
+                userName: string | null;
+                createdAt: string;
+            }[];
+            meta: {page: number; page_size: number; total: number; pages: number};
+        }>(exportsResponse);
+        const body = listing.items;
 
         expect(body.length).toBe(4);
+        expect(listing.meta).toEqual({page: 1, page_size: 10, total: 4, pages: 1});
         expect([...new Set(body.map((row) => row.report))].sort()).toEqual(["campaigns", "creative-trend"]);
         expect(body.every((row) => row.userName === "Rina Admin")).toBe(true);
         for (const row of body.filter((entry) => entry.filter.days === undefined)) {
@@ -379,7 +385,12 @@ describe("Reports and export", () => {
             `http://localhost/api/reports/exports`,
             {headers: {authorization: `Bearer ${token.key}`}}
         ));
-        expect((await listed.json() as unknown[]).length).toBe(4);
+        const listedBody = await readData<{
+            items: unknown[];
+            meta: {page: number; page_size: number; total: number; pages: number};
+        }>(listed);
+        expect(listedBody.items.length).toBe(4);
+        expect(listedBody.meta).toEqual({page: 1, page_size: 10, total: 4, pages: 1});
     });
 
     it("hides accounts owned by another tenant", async () => {
@@ -389,6 +400,10 @@ describe("Reports and export", () => {
         ));
 
         expect(response.status).toBe(404);
-        expect(await response.json()).toEqual({status: false, message: "Akun iklan tidak ditemukan"});
+        expect(await readError(response)).toEqual({
+            code: "NOT_FOUND",
+            message: "Akun iklan tidak ditemukan",
+            details: null,
+        });
     });
 });

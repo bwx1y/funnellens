@@ -82,11 +82,14 @@ export const AudienceSchema = {
             pattern: "^[1-9]\\d*$",
             description: "1-based page number, defaults to 1 and clamped to the last page",
         })),
+        page_size: t.Optional(t.String({
+            description: "Page size: 5, 10, 15, 20, 50, or 100 (default 10); any other value returns 400 INVALID_PAGE_SIZE",
+        })),
         pageSize: t.Optional(t.String({
-            description: "Page size: 5, 10, or 15 (default 10); any other value returns 422 INVALID_PAGE_SIZE",
+            description: "Deprecated alias of page_size",
         })),
         limit: t.Optional(t.String({
-            description: "Deprecated alias of pageSize, read only when pageSize is absent",
+            description: "Deprecated alias of page_size",
         })),
         sortBy: t.Optional(t.Union([
             t.Literal("createdAt"),

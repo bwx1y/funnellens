@@ -1,6 +1,7 @@
 import {requireAccountScope} from "@db/repositories/ad-account.repository";
 import {AdInsightDailyRepository} from "@db/repositories/ad-insight-daily.repository";
 import {ExportAuditRepository, type ExportAuditRow} from "@db/repositories/export-audit.repository";
+import {pageMeta, resolvePage, type PageMeta} from "@shared/pagination";
 import {resolvePeriod} from "@shared/period";
 import {csvDecimal, toCsv} from "@shared/csv";
 import {logger} from "@shared/logger";
@@ -24,6 +25,19 @@ export interface CampaignsCsvQuery {
 
 export interface ExportsQuery {
     accountId?: string;
+    page?: string;
+    page_size?: string;
+}
+
+export interface ExportListResponse {
+    items: ExportAuditRow[];
+    meta: PageMeta;
+    /** @deprecated alias of `meta.page`. */
+    page: number;
+    /** @deprecated alias of `meta.page_size`. */
+    limit: number;
+    /** @deprecated alias of `meta.total`. */
+    total: number;
 }
 
 export interface CsvReport {
@@ -143,8 +157,18 @@ export class ReportsService {
         }
     }
 
-    async listExports(tenantId: string, query: ExportsQuery): Promise<ExportAuditRow[]> {
-        return this.auditRepo.findRecent(tenantId, query.accountId);
+    async listExports(tenantId: string, query: ExportsQuery): Promise<ExportListResponse> {
+        const rows = await this.auditRepo.findRecent(tenantId, query.accountId);
+        const {page, pageSize} = resolvePage(query.page, query.page_size, rows.length);
+        const items = rows.slice((page - 1) * pageSize, page * pageSize);
+
+        return {
+            items,
+            meta: pageMeta(page, pageSize, rows.length),
+            page,
+            limit: pageSize,
+            total: rows.length,
+        };
     }
 
     /** Only the parameters the client actually sent, so an audit row never invents a default. */

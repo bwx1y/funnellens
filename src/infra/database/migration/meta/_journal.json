@@ -148,6 +148,13 @@
       "when": 1795621684279,
       "tag": "0020_strong_omega_red",
       "breakpoints": true
+    },
+    {
+      "idx": 21,
+      "version": "7",
+      "when": 1795623667874,
+      "tag": "0021_goofy_jackal",
+      "breakpoints": true
     }
   ]
 }

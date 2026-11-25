@@ -8,10 +8,13 @@ import {
     type AlertStatusFilter,
     type SnoozeHours,
 } from "@shared/alerts";
+import {pageMeta, resolvePage, type PageMeta} from "@shared/pagination";
 
 export interface AlertListQuery {
     accountId: string;
     status?: AlertStatusFilter;
+    page?: string;
+    page_size?: string;
 }
 
 export interface AlertRow {
@@ -36,9 +39,18 @@ export interface AlertRow {
 }
 
 export interface AlertListResponse {
+    items: AlertRow[];
+    meta: PageMeta;
     status: AlertStatusFilter;
-    alerts: AlertRow[];
     explanation: ExplanationRef | null;
+    /** @deprecated the unpaginated list, dropped after one release. */
+    alerts: AlertRow[];
+    /** @deprecated alias of `meta.page`. */
+    page: number;
+    /** @deprecated alias of `meta.page_size`. */
+    limit: number;
+    /** @deprecated alias of `meta.total`. */
+    total: number;
 }
 
 function toRow(alert: InsightAlert): AlertRow {
@@ -105,7 +117,20 @@ export class AlertService {
             evidenceIds: rows.map((row) => String(row.id)),
         });
 
-        return {status: filter, alerts: rows.map(toRow), explanation};
+        const mapped = rows.map(toRow);
+        const {page, pageSize} = resolvePage(query.page, query.page_size, mapped.length);
+        const items = mapped.slice((page - 1) * pageSize, page * pageSize);
+
+        return {
+            items,
+            meta: pageMeta(page, pageSize, mapped.length),
+            status: filter,
+            explanation,
+            alerts: mapped,
+            page,
+            limit: pageSize,
+            total: mapped.length,
+        };
     }
 
     async badge(tenantId: string, query: {accountId: string}): Promise<{count: number}> {

@@ -28,3 +28,4 @@ Daftar fitur backend yang telah selesai diimplementasikan dan diuji:
 | 22 | **Settings Workspace (objek workspace, mode read-only, status sumber, limits)** | [`22-settings-workspace.md`](./22-settings-workspace.md) | 2026-11-25 | Selesai & Teruji ✅ |
 | 23 | **Operasional Produksi (cache, health probe, DLQ, rate limit, metrik, retensi)** | [`23-ops-production.md`](./23-ops-production.md) | 2026-11-25 | Selesai & Teruji ✅ |
 | 24 | **Pengerasan Ingestion (token terenkripsi, status sumber, cursor, null semantik, rekonsiliasi, CTWA/PII)** | [`24-ingestion-hardening.md`](./24-ingestion-hardening.md) | 2026-11-25 | Selesai & Teruji ✅ |
+| 25 | **Kontrak API (envelope `{data,meta}`, error `{code,message,details}`, paginasi `page_size`/`pages`, role ADMIN/VIEWER)** | [`25-api-envelope-auth.md`](./25-api-envelope-auth.md) | 2026-11-25 | Selesai & Teruji ✅ |

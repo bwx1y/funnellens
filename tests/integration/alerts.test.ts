@@ -9,6 +9,7 @@ import {UserEntity} from "@db/schema/core/user.entity";
 import {AdAccountEntity} from "@db/schema/ads/ad-account.entity";
 import {InsightAlertEntity} from "@db/schema/ads/insight-alert.entity";
 import {JwtUtil} from "@shared/jwt";
+import {readData, readError} from "../helpers";
 import {eq} from "drizzle-orm";
 
 class TestCleanupRepository extends DatabaseRepository {
@@ -53,7 +54,7 @@ describe("Alerts management API", () => {
         ));
         expect(response.status).toBe(200);
 
-        return await response.json() as AlertListResponse;
+        return await readData<AlertListResponse>(response);
     };
 
     beforeAll(async () => {
@@ -132,7 +133,7 @@ describe("Alerts management API", () => {
             `http://localhost/api/alerts/badge?accountId=${accountId}`,
             {headers}
         ));
-        expect(await badgeBefore.json()).toEqual({count: 1});
+        expect(await readData(badgeBefore)).toEqual({count: 1});
 
         const startedAt = Date.now();
         const response = await app.handle(new Request(
@@ -144,7 +145,7 @@ describe("Alerts management API", () => {
             }
         ));
         expect(response.status).toBe(200);
-        const body = await response.json() as {id: number; status: string; snoozedUntil: string};
+        const body = await readData<{id: number; status: string; snoozedUntil: string}>(response);
         expect(body).toMatchObject({id: alertId, status: "SNOOZED"});
         const until = Date.parse(body.snoozedUntil);
         expect(until - startedAt).toBeGreaterThanOrEqual(24 * 3_600_000 - 5_000);
@@ -160,7 +161,7 @@ describe("Alerts management API", () => {
             `http://localhost/api/alerts/badge?accountId=${accountId}`,
             {headers}
         ));
-        expect(await badgeAfter.json()).toEqual({count: 0});
+        expect(await readData(badgeAfter)).toEqual({count: 0});
     });
 
     it("resolves with resolvedAt and the caller's user id", async () => {
@@ -169,7 +170,7 @@ describe("Alerts management API", () => {
             {method: "PATCH", headers}
         ));
         expect(response.status).toBe(200);
-        const body = await response.json() as {id: number; status: string; resolvedAt: string};
+        const body = await readData<{id: number; status: string; resolvedAt: string}>(response);
         expect(body).toMatchObject({id: alertId, status: "DONE"});
         expect(Number.isNaN(Date.parse(body.resolvedAt))).toBe(false);
 
@@ -193,7 +194,11 @@ describe("Alerts management API", () => {
             {headers}
         ));
         expect(forbiddenList.status).toBe(404);
-        expect(await forbiddenList.json()).toEqual({status: false, message: "Akun iklan tidak ditemukan"});
+        expect(await readError(forbiddenList)).toEqual({
+            code: "NOT_FOUND",
+            message: "Akun iklan tidak ditemukan",
+            details: null,
+        });
 
         const forbiddenSnooze = await app.handle(new Request(
             `http://localhost/api/alerts/${otherAlertId}/snooze`,
@@ -204,7 +209,11 @@ describe("Alerts management API", () => {
             }
         ));
         expect(forbiddenSnooze.status).toBe(404);
-        expect(await forbiddenSnooze.json()).toEqual({status: false, message: "Alert tidak ditemukan"});
+        expect(await readError(forbiddenSnooze)).toEqual({
+            code: "NOT_FOUND",
+            message: "Alert tidak ditemukan",
+            details: null,
+        });
 
         const forbiddenResolve = await app.handle(new Request(
             `http://localhost/api/alerts/${otherAlertId}/resolve`,

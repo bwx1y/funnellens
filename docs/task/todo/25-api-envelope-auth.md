@@ -6,14 +6,14 @@ Backend memakai envelope sendiri (`{status:false,message,code}` untuk error, obj
 ## Daftar Pekerjaan
 
 ### 1. Envelope respons (`src/plugins/envelope.plugin.ts`)
-- [ ] Buat plugin `envelope` dan pasang **setelah** `routes` di `src/index.ts`.
-- [ ] `onAfterHandle` (`as: 'global'`) membungkus payload JSON menjadi `{data: <payload>, meta: {requestId, cached?: boolean}}`.
-- [ ] Plugin **melewati** (tidak membungkus) bila salah satu benar:
+- [x] Buat plugin `envelope` dan pasang **setelah** `routes` di `src/index.ts`.
+- [x] `onAfterHandle` (`as: 'global'`) membungkus payload JSON menjadi `{data: <payload>, meta: {requestId, cached?: boolean}}`.
+- [x] Plugin **melewati** (tidak membungkus) bila salah satu benar:
   - path diawali `/api/wa/cloud/webhook` atau `/api/wa/webhook` (Meta/OpenWA mengharapkan `{status:true}`),
   - path diawali `/api/health`,
   - nilai `response` adalah instance `Response` (CSV, teks `hub.challenge`),
   - respons sudah punya kunci `data` **dan** `meta` (idempoten).
-- [ ] Ubah `onError` di `src/index.ts` agar mengembalikan:
+- [x] Ubah `onError` di `src/index.ts` agar mengembalikan:
   ```ts
   {error: {code: string, message: string, details: {path: string; message: string}[] | null}}
   ```
@@ -22,27 +22,27 @@ Backend memakai envelope sendiri (`{status:false,message,code}` untuk error, obj
   - Status HTTP tetap seperti sekarang (400/401/403/404/409/500).
 
 ### 2. Paginasi seragam
-- [ ] Tambah `src/shared/pagination.ts`:
+- [x] Tambah `src/shared/pagination.ts`:
   ```ts
   export interface PageMeta {page: number; page_size: number; total: number; pages: number}
   export function pageMeta(page: number, pageSize: number, total: number): PageMeta
   export function resolvePage(page: unknown, pageSize: unknown, total: number): {page: number; pageSize: number; pages: number}
   ```
   `resolvePage` meng-clamp `page` ke `[1, pages]` dan memvalidasi `page_size ∈ {5,10,15,20,50,100}` → `BadRequestError("page_size tidak valid", "INVALID_PAGE_SIZE")`.
-- [ ] Terapkan pada `GET /api/leads` (`src/modules/audience/service.ts`), `GET /api/alerts`, dan `GET /api/reports/exports`: payload menjadi `{items: T[], meta: PageMeta}` di dalam `data`.
-- [ ] Pertahankan `data`, `page`, `limit`, `total` lama sebagai field tambahan selama satu rilis agar konsumen lama tidak rusak.
+- [x] Terapkan pada `GET /api/leads` (`src/modules/audience/service.ts`), `GET /api/alerts`, dan `GET /api/reports/exports`: payload menjadi `{items: T[], meta: PageMeta}` di dalam `data`.
+- [x] Pertahankan `data`, `page`, `limit`, `total` lama sebagai field tambahan selama satu rilis agar konsumen lama tidak rusak.
 
 ### 3. Role `viewer` / `admin` (F-01.2)
-- [ ] Migrasi enum: `ALTER TYPE role ADD VALUE IF NOT EXISTS 'VIEWER';` lalu `UPDATE users SET role = 'ADMIN' WHERE role = 'MANAGER';` dan hapus `MANAGER` dari `userRoleEnum` (`src/infra/database/schema/enums.ts`).
-- [ ] Tambah `src/shared/guards.ts`:
+- [x] Migrasi enum: `ALTER TYPE role ADD VALUE IF NOT EXISTS 'VIEWER';` lalu `UPDATE users SET role = 'ADMIN' WHERE role = 'MANAGER';` dan hapus `MANAGER` dari `userRoleEnum` (`src/infra/database/schema/enums.ts`).
+- [x] Tambah `src/shared/guards.ts`:
   ```ts
   export const requireAdmin = new Elysia({name: "require-admin"}).derive(...)
   ```
   → `throw new ForbiddenError("Butuh role ADMIN", "FORBIDDEN")` bila `user.role !== "ADMIN"`.
-- [ ] Pasang `requireAdmin` pada: `POST /meta/oauth/*`, `DELETE /meta/connection`, `POST /meta/accounts/select`, seluruh `POST /meta/sync/*` dan `/meta/queue/*`, `POST`/`PUT`/`DELETE /wa/session*`, `POST /users`, `GET /metrics`, `GET /meta/queue/dlq`, `DELETE /leads/{id}`, `POST /reports/recorded-orders`.
-- [ ] `VIEWER` tetap boleh: seluruh `GET` analytics/leads/alerts/tracking/settings/sources, `PATCH /leads/{id}`, `PATCH /alerts/{id}/resolve|snooze`, `PATCH /insights/{key}/review`.
-- [ ] `POST /api/auth/register` membuat user pertama tenant sebagai `ADMIN`; user berikutnya default `VIEWER` (bukan `ADMIN` seperti sekarang).
-- [ ] Tambah 403 konsisten: setiap penolakan role mengembalikan `{error:{code:"FORBIDDEN"}}` dengan status `403`.
+- [x] Pasang `requireAdmin` pada: `POST /meta/oauth/*`, `DELETE /meta/connection`, `POST /meta/accounts/select`, seluruh `POST /meta/sync/*` dan `/meta/queue/*`, `POST`/`PUT`/`DELETE /wa/session*`, `POST /users`, `GET /metrics`, `GET /meta/queue/dlq`, `DELETE /leads/{id}`, `POST /reports/recorded-orders`.
+- [x] `VIEWER` tetap boleh: seluruh `GET` analytics/leads/alerts/tracking/settings/sources, `PATCH /leads/{id}`, `PATCH /alerts/{id}/resolve|snooze`, `PATCH /insights/{key}/review`.
+- [x] `POST /api/auth/register` membuat user pertama tenant sebagai `ADMIN`; user berikutnya default `VIEWER` (bukan `ADMIN` seperti sekarang).
+- [x] Tambah 403 konsisten: setiap penolakan role mengembalikan `{error:{code:"FORBIDDEN"}}` dengan status `403`.
 
 ## File yang Disentuh
 - `src/plugins/envelope.plugin.ts` (baru), `src/index.ts`

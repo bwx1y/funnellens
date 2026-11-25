@@ -1,8 +1,9 @@
 import {Elysia} from "elysia";
 import openapi from "@elysia/openapi";
-import {AppError} from "@shared/errors";
+import {AppError, codeForStatus} from "@shared/errors";
 import {Config} from "@/config";
 import {routes} from "@/routes";
+import {envelope} from "@/plugins/envelope.plugin";
 import {httpLogger} from "@/plugins/logger.plugin";
 import {rateLimit} from "@/plugins/rate-limit.plugin";
 import {idempotency} from "@/plugins/idempotency.plugin";
@@ -29,47 +30,62 @@ export const app = new Elysia()
         if (error instanceof AppError) {
             set.status = error.statusCode
             return {
-                status: false,
-                message: error.message,
-                code: error.code
+                error: {
+                    code: error.code ?? codeForStatus(error.statusCode),
+                    message: error.message,
+                    details: null
+                }
             }
         }
 
         if (code === "VALIDATION") {
             set.status = 400
             return {
-                status: false,
-                message: "Validation Error",
-                error: error.all?.map((item) => ({
-                    path: item.path,
-                    message: item.schema?.error ?? item.message,
-                    type: item.schema?.type
-                }))
+                error: {
+                    code: "VALIDATION_ERROR",
+                    message: "Validation Error",
+                    details: error.all?.map((item) => ({
+                        path: item.path,
+                        message: item.schema?.error ?? item.message
+                    })) ?? null
+                }
             }
         }
 
         if (code === "PARSE") {
             set.status = 400
             return {
-                status: false,
-                message: "Invalid JSON format"
+                error: {
+                    code: "PARSE_ERROR",
+                    message: "Invalid JSON format",
+                    details: null
+                }
             }
         }
 
         if (code === "NOT_FOUND") {
             set.status = 404
             return {
-                status: false,
-                message: "Route not found"
+                error: {
+                    code: "NOT_FOUND",
+                    message: "Route not found",
+                    details: null
+                }
             }
         }
 
         set.status = 500
         return {
-            status: false,
-            message: Config.application.mode == "development" ? error : "Internal Server Error"
+            error: {
+                code: "INTERNAL_ERROR",
+                message: Config.application.mode == "development" ? error : "Internal Server Error",
+                details: null
+            }
         }
     })
+    // Registered before the routes: Elysia applies a global hook only to the routes mounted after it.
+    // It rewrites successful handler payloads, never the error envelope above.
+    .use(envelope)
     .use(routes);
 
 if (Config.application.mode == "development") {

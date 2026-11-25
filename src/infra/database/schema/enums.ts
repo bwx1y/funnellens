@@ -1,6 +1,6 @@
 import {pgEnum} from "drizzle-orm/pg-core";
 
-export const userRoleEnum = pgEnum("role", ["ADMIN", "MANAGER"]);
+export const userRoleEnum = pgEnum("role", ["ADMIN", "VIEWER"]);
 
 export const userTokenTypeEnum = pgEnum("token_type", [
     "EMAIL_VERIFICATION",
