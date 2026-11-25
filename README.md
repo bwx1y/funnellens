@@ -73,6 +73,9 @@ bun run db:push
 
 # Atau generate file migrasi SQL ke src/infra/database/migration/
 bun run db:generate
+
+# Seed dataset demo deterministik (membuat tenant & akun demo terpisah)
+bun run db:seed
 ```
 
 4. Jalankan aplikasi:

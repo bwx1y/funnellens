@@ -7,6 +7,7 @@
     "db:generate": "drizzle-kit generate",
     "db:push": "drizzle-kit push",
     "db:drop": "bun run scripts/db-drop.ts",
+    "db:seed": "bun run scripts/seed-demo.ts",
     "db:reset": "bun run scripts/db-drop.ts && drizzle-kit push --force",
     "db:studio": "drizzle-kit studio"
   },
