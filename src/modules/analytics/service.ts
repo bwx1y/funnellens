@@ -8,8 +8,8 @@ import {InsightAlertRepository} from "@db/repositories/insight-alert.repository"
 import {requireAccountScope} from "@db/repositories/ad-account.repository";
 import {BadRequestError} from "@shared/errors";
 import {bucketIndex, dateRange} from "@shared/dates";
-import {round4} from "@shared/numbers";
-import {resolvePeriod} from "@shared/period";
+import {direction, round4, type DeltaDirection} from "@shared/numbers";
+import {isPartialDay, periodLabel, resolvePeriod} from "@shared/period";
 import {funnelHealth, type FunnelHealthResult, type HealthBadge} from "@shared/health";
 import {ExplanationService, type ExplanationRef} from "@/modules/explanations/service";
 import {formatMoney, formatNumber, formatPercent} from "@/modules/explanations/rules";
@@ -54,11 +54,13 @@ export interface SummaryQuery {
     since?: string;
     until?: string;
     campaignId?: string;
+    days?: number;
 }
 
 export interface KpiCard {
     value: number | null;
     deltaPct: number | null;
+    direction?: DeltaDirection | null;
     sparkline: (number | null)[] | null;
     note?: string;
 }
@@ -76,8 +78,8 @@ export interface SummaryCampaignRow {
 }
 
 export interface SummaryResponse {
-    period: {since: string; until: string; days: number};
-    previousPeriod: {since: string; until: string};
+    period: {since: string; until: string; days: number; label: string; isPartial: boolean};
+    previousPeriod: {since: string; until: string; label: string};
     currency: string;
     timezone: string;
     cards: {
@@ -115,6 +117,7 @@ export interface FunnelQuery {
     since?: string;
     until?: string;
     campaignId?: string;
+    days?: number;
     objectiveGroup?: FunnelObjectiveGroup;
 }
 
@@ -122,6 +125,7 @@ export interface LeakageQuery {
     accountId: string;
     since?: string;
     until?: string;
+    days?: number;
 }
 
 export interface StageDetailQuery {
@@ -129,6 +133,7 @@ export interface StageDetailQuery {
     stageKey: string;
     since?: string;
     until?: string;
+    days?: number;
 }
 
 export interface FunnelStageView {
@@ -143,8 +148,8 @@ export interface FunnelStageView {
 
 export interface FunnelResponse {
     objectiveGroup: FunnelObjectiveGroup;
-    period: {since: string; until: string; days: number};
-    previousPeriod: {since: string; until: string};
+    period: {since: string; until: string; days: number; label: string; isPartial: boolean};
+    previousPeriod: {since: string; until: string; label: string};
     stages: FunnelStageView[];
     pairs: FunnelPair[];
     sample: SampleBlock;
@@ -171,6 +176,7 @@ export interface StageComparisonRow {
     current: number;
     previous: number;
     changePct: number | null;
+    direction: DeltaDirection | null;
     conversionRate: number | null;
     status: FunnelPairStatus;
 }
@@ -179,8 +185,8 @@ export interface StageDetailResponse {
     stageKey: FunnelStageKey;
     label: string;
     objectiveGroup: FunnelObjectiveGroup;
-    period: {since: string; until: string; days: number};
-    previousPeriod: {since: string; until: string};
+    period: {since: string; until: string; days: number; label: string; isPartial: boolean};
+    previousPeriod: {since: string; until: string; label: string};
     daily: {date: string; value: number}[];
     comparisonTable: StageComparisonRow[];
     sample: SampleBlock;
@@ -272,13 +278,23 @@ export class AnalyticsService {
         const previousQualified = previousStages.qualified;
 
         const spendDelta = percentChange(current.spendMinor, previous.spendMinor);
-        const spendCard: KpiCard = {value: current.spendMinor, deltaPct: spendDelta, sparkline: spendByBucket};
+        const spendCard: KpiCard = {
+            value: current.spendMinor,
+            deltaPct: spendDelta,
+            direction: direction(spendDelta),
+            sparkline: spendByBucket,
+        };
         if (spendDelta === null) {
             spendCard.note = "Perbandingan tidak tersedia karena periode sebelumnya tanpa belanja.";
         }
 
         const leadsDelta = percentChange(current.messagingStarted, previous.messagingStarted);
-        const leadsCard: KpiCard = {value: current.messagingStarted, deltaPct: leadsDelta, sparkline: leadsByBucket};
+        const leadsCard: KpiCard = {
+            value: current.messagingStarted,
+            deltaPct: leadsDelta,
+            direction: direction(leadsDelta),
+            sparkline: leadsByBucket,
+        };
         if (leadsDelta === null) {
             leadsCard.note = "Perbandingan tidak tersedia karena periode sebelumnya tanpa lead.";
         }
@@ -287,7 +303,12 @@ export class AnalyticsService {
         const cplDelta = qualified > 0 && previousQualified > 0
             ? percentChange(current.spendMinor / qualified, previous.spendMinor / previousQualified)
             : null;
-        const cplCard: KpiCard = {value: cplQualified, deltaPct: cplDelta, sparkline: cplSparkline};
+        const cplCard: KpiCard = {
+            value: cplQualified,
+            deltaPct: cplDelta,
+            direction: direction(cplDelta),
+            sparkline: cplSparkline,
+        };
         if (cplQualified === null) {
             cplCard.note = "Belum ada lead qualified pada periode ini";
         } else if (cplDelta === null) {
@@ -297,7 +318,12 @@ export class AnalyticsService {
         const roas = current.spendMinor > 0 ? round4(current.purchaseValueMinor / current.spendMinor) : null;
         const previousRoas = previous.spendMinor > 0 ? round4(previous.purchaseValueMinor / previous.spendMinor) : null;
         const roasDelta = roas !== null && previousRoas !== null ? percentChange(roas, previousRoas) : null;
-        const roasCard: KpiCard = {value: roas, deltaPct: roasDelta, sparkline: roasSparkline};
+        const roasCard: KpiCard = {
+            value: roas,
+            deltaPct: roasDelta,
+            direction: direction(roasDelta),
+            sparkline: roasSparkline,
+        };
         if (roas === null) {
             roasCard.note = "Belanja iklan nol pada periode ini";
         } else if (roasDelta === null) {
@@ -315,6 +341,7 @@ export class AnalyticsService {
         const funnelCard: KpiCard & {badge: HealthBadge | null} = {
             value: health.score,
             deltaPct: null,
+            direction: null,
             sparkline: null,
             badge: health.badge,
             note: health.score === null
@@ -385,8 +412,18 @@ export class AnalyticsService {
         });
 
         return {
-            period: {since, until, days},
-            previousPeriod: {since: previousSince, until: previousUntil},
+            period: {
+                since,
+                until,
+                days,
+                label: periodLabel(since, until),
+                isPartial: isPartialDay(until, account.timezoneName),
+            },
+            previousPeriod: {
+                since: previousSince,
+                until: previousUntil,
+                label: periodLabel(previousSince, previousUntil),
+            },
             currency: account.currency,
             timezone: account.timezoneName,
             cards: {
@@ -452,8 +489,18 @@ export class AnalyticsService {
 
         const response: FunnelResponse = {
             objectiveGroup,
-            period: {since: period.since, until: period.until, days: period.days},
-            previousPeriod: {since: period.previousSince, until: period.previousUntil},
+            period: {
+                since: period.since,
+                until: period.until,
+                days: period.days,
+                label: periodLabel(period.since, period.until),
+                isPartial: isPartialDay(period.until, account.timezoneName),
+            },
+            previousPeriod: {
+                since: period.previousSince,
+                until: period.previousUntil,
+                label: periodLabel(period.previousSince, period.previousUntil),
+            },
             stages,
             pairs: funnel.pairs,
             sample: funnel.sample,
@@ -573,13 +620,15 @@ export class AnalyticsService {
             const current = funnel.stages[index].value;
             const previous = funnel.previousStages[index].value;
             const incoming = index === 0 ? null : funnel.pairs[index - 1];
+            const changePct = percentChange(current, previous);
 
             return {
                 stageKey: stage.key,
                 label: stage.label,
                 current,
                 previous,
-                changePct: percentChange(current, previous),
+                changePct,
+                direction: direction(changePct),
                 conversionRate: incoming?.rate ?? null,
                 status: incoming?.status ?? "normal",
             };
@@ -589,8 +638,18 @@ export class AnalyticsService {
             stageKey: definition.key,
             label: definition.label,
             objectiveGroup,
-            period: {since: period.since, until: period.until, days: period.days},
-            previousPeriod: {since: period.previousSince, until: period.previousUntil},
+            period: {
+                since: period.since,
+                until: period.until,
+                days: period.days,
+                label: periodLabel(period.since, period.until),
+                isPartial: isPartialDay(period.until, account.timezoneName),
+            },
+            previousPeriod: {
+                since: period.previousSince,
+                until: period.previousUntil,
+                label: periodLabel(period.previousSince, period.previousUntil),
+            },
             daily,
             comparisonTable,
             sample: funnel.sample,

@@ -1,4 +1,4 @@
-import {round2, round4} from "@shared/numbers";
+import {direction, round2, round4, type DeltaDirection} from "@shared/numbers";
 
 export type FunnelObjectiveGroup = "wa" | "web";
 
@@ -78,6 +78,7 @@ export interface FunnelPair {
     rate: number | null;
     baseline: number | null;
     deltaPp: number | null;
+    direction: DeltaDirection | null;
     estimatedGap: number | null;
     status: FunnelPairStatus | null;
     eligible: boolean;
@@ -131,6 +132,7 @@ export function computePair(args: {
         rate,
         baseline,
         deltaPp,
+        direction: direction(deltaPp),
         estimatedGap,
         status: pairStatus(deltaPp),
         eligible,

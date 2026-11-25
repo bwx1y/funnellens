@@ -10,6 +10,10 @@ const until = t.Optional(t.String({
     description: "End date (YYYY-MM-DD), defaults to today in the account timezone",
 }));
 
+const days = t.Optional(t.Union([t.Literal(7), t.Literal(14), t.Literal(30)], {
+    description: "Period duration in days (7, 14, 30)",
+}));
+
 const accountId = t.String({
     description: "Meta Ad Account ID",
 });
@@ -29,6 +33,7 @@ export const AudienceSchema = {
         accountId,
         since,
         until,
+        days,
         campaignId: t.Optional(t.String({
             description: "Optional campaign filter",
         })),
@@ -37,21 +42,25 @@ export const AudienceSchema = {
         accountId,
         since,
         until,
+        days,
     }),
     segments: t.Object({
         accountId,
         since,
         until,
+        days,
     }),
     pipeline: t.Object({
         accountId,
         since,
         until,
+        days,
     }),
     conversations: t.Object({
         accountId,
         since,
         until,
+        days,
     }),
     leadList: t.Object({
         accountId,

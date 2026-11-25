@@ -239,8 +239,18 @@ describe("Analytics funnel", () => {
         });
 
         expect(result.sample).toEqual({n: 10000, denominator: 100, eligible: true, gate: "≥ 100 tayangan"});
-        expect(result.period).toEqual({since: SINCE, until: UNTIL, days: 2});
-        expect(result.previousPeriod).toEqual({since: "2026-02-27", until: "2026-02-28"});
+        expect(result.period).toEqual({
+            since: SINCE,
+            until: UNTIL,
+            days: 2,
+            label: "1–2 Mar 2026",
+            isPartial: false,
+        });
+        expect(result.previousPeriod).toEqual({
+            since: "2026-02-27",
+            until: "2026-02-28",
+            label: "27–28 Feb 2026",
+        });
         expect(result.note).toBeUndefined();
     });
 
@@ -293,6 +303,7 @@ describe("Analytics funnel", () => {
             current: 10000,
             previous: 12000,
             changePct: -16.67,
+            direction: "down",
             conversionRate: null,
             status: "normal",
         });
@@ -302,6 +313,7 @@ describe("Analytics funnel", () => {
             current: 180,
             previous: 250,
             changePct: -28,
+            direction: "down",
             conversionRate: 0.2,
             status: "perlu_perhatian",
         });

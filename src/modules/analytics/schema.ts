@@ -1,5 +1,9 @@
 import {t, type UnwrapSchema} from "elysia";
 
+const daysParam = t.Optional(t.Union([t.Literal(7), t.Literal(14), t.Literal(30)], {
+    description: "Period duration in days (7, 14, 30)",
+}));
+
 export const AnalyticsSchema = {
     summary: t.Object({
         accountId: t.String({
@@ -13,6 +17,7 @@ export const AnalyticsSchema = {
             pattern: "^\\d{4}-\\d{2}-\\d{2}$",
             description: "End date (YYYY-MM-DD), defaults to today in the account timezone",
         })),
+        days: daysParam,
         campaignId: t.Optional(t.String({
             description: "Optional campaign filter",
         })),
@@ -29,6 +34,7 @@ export const AnalyticsSchema = {
             pattern: "^\\d{4}-\\d{2}-\\d{2}$",
             description: "End date (YYYY-MM-DD), defaults to today in the account timezone",
         })),
+        days: daysParam,
         campaignId: t.Optional(t.String({
             description: "Optional campaign filter",
         })),
@@ -49,6 +55,7 @@ export const AnalyticsSchema = {
             pattern: "^\\d{4}-\\d{2}-\\d{2}$",
             description: "End date (YYYY-MM-DD), defaults to today in the account timezone",
         })),
+        days: daysParam,
     }),
     stageDetail: t.Object({
         accountId: t.String({
@@ -65,6 +72,7 @@ export const AnalyticsSchema = {
             pattern: "^\\d{4}-\\d{2}-\\d{2}$",
             description: "End date (YYYY-MM-DD), defaults to today in the account timezone",
         })),
+        days: daysParam,
     }),
 }
 

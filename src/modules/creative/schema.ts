@@ -10,6 +10,10 @@ const until = t.Optional(t.String({
     description: "End date (YYYY-MM-DD), defaults to today in the account timezone",
 }));
 
+const days = t.Optional(t.Union([t.Literal(7), t.Literal(14), t.Literal(30)], {
+    description: "Period duration in days (7, 14, 30)",
+}));
+
 const accountId = t.String({
     description: "Meta Ad Account ID",
 });
@@ -28,6 +32,7 @@ export const CreativeSchema = {
         accountId,
         since,
         until,
+        days,
         campaignId: t.Optional(t.String({
             description: "Optional campaign filter; percentiles stay account-wide",
         })),
@@ -44,9 +49,11 @@ export const CreativeSchema = {
         accountId,
         since,
         until,
+        days,
     }),
     experiments: t.Object({
         accountId,
+        days,
     }),
     comparison: t.Object({
         accountId,

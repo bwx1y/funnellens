@@ -294,8 +294,18 @@ describe("Analytics summary", () => {
         expect(result.campaigns[0].costPerLeadMinor).toBe(21429);
         expect(result.campaigns[0].roas).toBe(2);
 
-        expect(result.period).toEqual({since: SINCE, until: UNTIL, days: 10});
-        expect(result.previousPeriod).toEqual({since: "2026-02-11", until: "2026-02-20"});
+        expect(result.period).toEqual({
+            since: SINCE,
+            until: UNTIL,
+            days: 10,
+            label: "21 Feb – 2 Mar 2026",
+            isPartial: false,
+        });
+        expect(result.previousPeriod).toEqual({
+            since: "2026-02-11",
+            until: "2026-02-20",
+            label: "11–20 Feb 2026",
+        });
         expect(result.currency).toBe("IDR");
         expect(result.timezone).toBe("Asia/Jakarta");
         expect(result.sample).toEqual({n: 1500, denominator: 100, eligible: true, gate: "≥ 100 tayangan"});

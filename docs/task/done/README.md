@@ -21,3 +21,4 @@ Daftar fitur backend yang telah selesai diimplementasikan dan diuji:
 | 15 | **Lead Assessment & Response Types** | [`15-lead-assessment.md`](./15-lead-assessment.md) | 2026-11-21 | Selesai & Teruji ✅ |
 | 16 | **AI Explanations per Blok** | [`16-ai-explanations.md`](./16-ai-explanations.md) | 2026-11-21 | Selesai & Teruji ✅ |
 | 17 | **Seed Parity Dataset Demo** | [`17-seed-parity.md`](./17-seed-parity.md) | 2026-11-25 | Selesai & Teruji ✅ |
+| 18 | **Kontrak Periode (7/14/30 hari, label id-ID, is_partial, arah)** | [`18-period-contract.md`](./18-period-contract.md) | 2026-11-25 | Selesai & Teruji ✅ |

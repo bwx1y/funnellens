@@ -490,8 +490,18 @@ describe("Audience intelligence", () => {
         });
         expect(result.sample).toEqual({n: 7, denominator: 30, eligible: false, gate: "≥ 30 lead"});
         expect(result.note).toBe("1 lead belum dinilai sehingga tidak masuk distribusi.");
-        expect(result.period).toEqual({since: SINCE, until: UNTIL, days: 1});
-        expect(result.previousPeriod).toEqual({since: "2026-02-28", until: "2026-02-28"});
+        expect(result.period).toEqual({
+            since: SINCE,
+            until: UNTIL,
+            days: 1,
+            label: "1–1 Mar 2026",
+            isPartial: false,
+        });
+        expect(result.previousPeriod).toEqual({
+            since: "2026-02-28",
+            until: "2026-02-28",
+            label: "28–28 Feb 2026",
+        });
     });
 
     it("reports first-reply speed, response buckets, and the gated heatmap", async () => {

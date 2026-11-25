@@ -8,7 +8,7 @@ import {requireAccountScope} from "@db/repositories/ad-account.repository";
 import {NotFoundError} from "@shared/errors";
 import {safeTimeZone} from "@shared/dates";
 import {round2, round4} from "@shared/numbers";
-import {resolvePeriod} from "@shared/period";
+import {isPartialDay, periodLabel, resolvePeriod} from "@shared/period";
 import {ExplanationService, type ExplanationRef} from "@/modules/explanations/service";
 import {formatDuration, formatNumber, formatPercent} from "@/modules/explanations/rules";
 import {
@@ -33,12 +33,14 @@ export interface AudienceQuery {
     since?: string;
     until?: string;
     campaignId?: string;
+    days?: number;
 }
 
 export interface RangeQuery {
     accountId: string;
     since?: string;
     until?: string;
+    days?: number;
 }
 
 export interface SampleBlock {
@@ -49,8 +51,8 @@ export interface SampleBlock {
 }
 
 export interface AudienceResponse {
-    period: {since: string; until: string; days: number};
-    previousPeriod: {since: string; until: string};
+    period: {since: string; until: string; days: number; label: string; isPartial: boolean};
+    previousPeriod: {since: string; until: string; label: string};
     distribution: {
         temperature: "hot" | "warm" | "cold";
         count: number;
@@ -77,7 +79,7 @@ export interface AudienceResponse {
 }
 
 export interface SpeedResponse {
-    period: {since: string; until: string; days: number};
+    period: {since: string; until: string; days: number; label: string; isPartial: boolean};
     avgFirstReplySeconds: number | null;
     longestWaitMinutes: number | null;
     /** Account-wide backlog (not period-scoped): unanswered for more than 24 hours. */
@@ -95,7 +97,7 @@ export interface SpeedResponse {
 }
 
 export interface SegmentsResponse {
-    period: {since: string; until: string; days: number};
+    period: {since: string; until: string; days: number; label: string; isPartial: boolean};
     placements: {
         publisherPlatform: string | null;
         platformPosition: string | null;
@@ -132,14 +134,14 @@ export interface PipelineRow {
 }
 
 export interface PipelineResponse {
-    period: {since: string; until: string; days: number};
+    period: {since: string; until: string; days: number; label: string; isPartial: boolean};
     rows: PipelineRow[];
     sample: SampleBlock;
     note?: string;
 }
 
 export interface ConversationsResponse {
-    period: {since: string; until: string; days: number};
+    period: {since: string; until: string; days: number; label: string; isPartial: boolean};
     counts: {responseType: string; count: number}[];
     classifiedLeads: number;
     timed: {medianSeconds: number | null; measuredLeads: number; observedLeads: number};
@@ -271,8 +273,18 @@ export class AudienceService {
         });
 
         return {
-            period: {since: period.since, until: period.until, days: period.days},
-            previousPeriod: {since: period.previousSince, until: period.previousUntil},
+            period: {
+                since: period.since,
+                until: period.until,
+                days: period.days,
+                label: periodLabel(period.since, period.until),
+                isPartial: isPartialDay(period.until, account.timezoneName),
+            },
+            previousPeriod: {
+                since: period.previousSince,
+                until: period.previousUntil,
+                label: periodLabel(period.previousSince, period.previousUntil),
+            },
             distribution,
             total,
             unassessed: current.unassessed,
@@ -354,7 +366,13 @@ export class AudienceService {
         });
 
         return {
-            period: {since: period.since, until: period.until, days: period.days},
+            period: {
+                since: period.since,
+                until: period.until,
+                days: period.days,
+                label: periodLabel(period.since, period.until),
+                isPartial: isPartialDay(period.until, account.timezoneName),
+            },
             avgFirstReplySeconds: metrics.avgFirstReplySeconds,
             longestWaitMinutes: metrics.longestWaitMinutes,
             stuckLeads: metrics.stuckLeads,
@@ -473,7 +491,13 @@ export class AudienceService {
         const impressions = placementMetrics.reduce((sum, row) => sum + row.impressions, 0);
 
         return {
-            period: {since: period.since, until: period.until, days: period.days},
+            period: {
+                since: period.since,
+                until: period.until,
+                days: period.days,
+                label: periodLabel(period.since, period.until),
+                isPartial: isPartialDay(period.until, account.timezoneName),
+            },
             placements,
             devices,
             hours,
@@ -539,7 +563,13 @@ export class AudienceService {
         }));
 
         return {
-            period: {since: period.since, until: period.until, days: period.days},
+            period: {
+                since: period.since,
+                until: period.until,
+                days: period.days,
+                label: periodLabel(period.since, period.until),
+                isPartial: isPartialDay(period.until, account.timezoneName),
+            },
             rows,
             sample: {
                 n: rows.length,
@@ -625,7 +655,13 @@ export class AudienceService {
         ]);
 
         return {
-            period: {since: period.since, until: period.until, days: period.days},
+            period: {
+                since: period.since,
+                until: period.until,
+                days: period.days,
+                label: periodLabel(period.since, period.until),
+                isPartial: isPartialDay(period.until, account.timezoneName),
+            },
             counts,
             classifiedLeads,
             timed: timedBlock,

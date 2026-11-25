@@ -15,7 +15,7 @@ import {BadRequestError, NotFoundError} from "@shared/errors";
 import {Config} from "@/config";
 import {addDays, dateRange, dayCount, endOfDayUtc, startOfDayUtc} from "@shared/dates";
 import {median, round4} from "@shared/numbers";
-import {resolvePeriod, type ResolvedPeriod} from "@shared/period";
+import {isPartialDay, periodLabel, resolvePeriod, type ResolvedPeriod} from "@shared/period";
 import type {SampleBlock} from "@shared/funnel";
 import {CreativeTaggingQueue} from "@/modules/creative/queue";
 import {ExplanationService, type ExplanationRef} from "@/modules/explanations/service";
@@ -82,6 +82,7 @@ export interface CreativeListQuery {
     since?: string;
     until?: string;
     campaignId?: string;
+    days?: number;
     sortBy?: CreativeSortKey;
 }
 
@@ -89,6 +90,7 @@ export interface CreativeRangeQuery {
     accountId: string;
     since?: string;
     until?: string;
+    days?: number;
 }
 
 export interface ComparisonQuery {
@@ -131,7 +133,7 @@ export interface CreativeRow {
 }
 
 export interface CreativeListResponse {
-    period: {since: string; until: string; days: number};
+    period: {since: string; until: string; days: number; label: string; isPartial: boolean};
     sortBy: CreativeSortKey;
     creatives: CreativeRow[];
     sample: SampleBlock;
@@ -150,7 +152,7 @@ export interface CreativeDetailResponse {
     title: string | null;
     body: string | null;
     callToActionType: string | null;
-    period: {since: string; until: string; days: number};
+    period: {since: string; until: string; days: number; label: string; isPartial: boolean};
     metrics: {
         spendMinor: number;
         impressions: number;
@@ -204,7 +206,7 @@ export interface FatigueRow {
 }
 
 export interface FatigueResponse {
-    period: {since: string; until: string; days: number};
+    period: {since: string; until: string; days: number; label: string; isPartial: boolean};
     creatives: FatigueRow[];
     sample: SampleBlock;
     note?: string;
@@ -225,7 +227,7 @@ export interface PatternRow {
 }
 
 export interface PatternsResponse {
-    period: {since: string; until: string; days: number};
+    period: {since: string; until: string; days: number; label: string; isPartial: boolean};
     attributes: PatternRow[];
     tested: number;
     sample: SampleBlock;
@@ -248,7 +250,7 @@ export interface LeadQualityRow {
 }
 
 export interface LeadQualityResponse {
-    period: {since: string; until: string; days: number};
+    period: {since: string; until: string; days: number; label: string; isPartial: boolean};
     rows: LeadQualityRow[];
     sample: SampleBlock;
     note?: string;
@@ -333,8 +335,17 @@ interface DerivedRow {
     allocationLimited: boolean;
 }
 
-function periodBlock(period: ResolvedPeriod): {since: string; until: string; days: number} {
-    return {since: period.since, until: period.until, days: period.days};
+function periodBlock(
+    period: ResolvedPeriod,
+    timezoneName: string
+): {since: string; until: string; days: number; label: string; isPartial: boolean} {
+    return {
+        since: period.since,
+        until: period.until,
+        days: period.days,
+        label: periodLabel(period.since, period.until),
+        isPartial: isPartialDay(period.until, timezoneName),
+    };
 }
 
 function creativeGate(n: number): SampleBlock {
@@ -377,7 +388,7 @@ export class CreativeService {
             .sort((left, right) => compareCreativeRows(left, right, sortBy));
 
         const response: CreativeListResponse = {
-            period: periodBlock(period),
+            period: periodBlock(period, account.timezoneName),
             sortBy,
             creatives,
             sample: creativeGate(creatives.length),
@@ -437,7 +448,7 @@ export class CreativeService {
             .filter((frequency): frequency is number => frequency !== null);
 
         const response: FatigueResponse = {
-            period: periodBlock(period),
+            period: periodBlock(period, account.timezoneName),
             creatives,
             sample: creativeGate(creatives.length),
             explanation: await this.explanations.ensure({
@@ -535,7 +546,7 @@ export class CreativeService {
         );
 
         const response: PatternsResponse = {
-            period: periodBlock(period),
+            period: periodBlock(period, account.timezoneName),
             attributes,
             tested: attributes.filter((row) => row.pValue !== null).length,
             sample: {
@@ -634,7 +645,7 @@ export class CreativeService {
         );
 
         const response: LeadQualityResponse = {
-            period: periodBlock(period),
+            period: periodBlock(period, account.timezoneName),
             rows,
             sample: creativeGate(rows.length),
             explanation: await this.explanations.ensure({
@@ -839,7 +850,7 @@ export class CreativeService {
             title: creative.title ?? null,
             body: creative.body ?? null,
             callToActionType: creative.callToActionType ?? null,
-            period: periodBlock(period),
+            period: periodBlock(period, account.timezoneName),
             metrics: {
                 spendMinor: aggregate?.spendMinor ?? 0,
                 impressions,

@@ -6,19 +6,19 @@
 ## Daftar Pekerjaan
 
 ### 1. `days` + snapshot end (`src/shared/period.ts`)
-- [ ] Tambah `export const PERIOD_DAYS = [7, 14, 30] as const;` dan `export type PeriodDays = typeof PERIOD_DAYS[number];`.
-- [ ] Tambah `export const DEFAULT_SNAPSHOT_END = "2026-11-19";` (snapshot prototipe).
-- [ ] Ubah `resolvePeriod(account, query)` menerima `{since?, until?, days?}`:
+- [x] Tambah `export const PERIOD_DAYS = [7, 14, 30] as const;` dan `export type PeriodDays = typeof PERIOD_DAYS[number];`.
+- [x] Tambah `export const DEFAULT_SNAPSHOT_END = "2026-11-19";` (snapshot prototipe).
+- [x] Ubah `resolvePeriod(account, query)` menerima `{since?, until?, days?}`:
   - `days` terisi → `until = query.until ?? DEFAULT_SNAPSHOT_END`, `since = addDays(until, -(days - 1))`.
   - `days` kosong → perilaku sekarang (default 30 hari mundur dari `todayInZone`).
   - `days` di luar `PERIOD_DAYS` → `throw new BadRequestError("days harus 7, 14, atau 30", "INVALID_DAYS")`.
   - `since`/`until` dan `days` dikirim bersamaan → `days` menang; `since`/`until` diabaikan.
-- [ ] Tambah `snapshotEnd: string` pada `ResolvedPeriod` (nilai `until`), supaya narasi bisa menyebut tanggal snapshot.
+- [x] Tambah `snapshotEnd: string` pada `ResolvedPeriod` (nilai `until`), supaya narasi bisa menyebut tanggal snapshot.
 
 ### 2. Label id-ID + is_partial
-- [ ] Tambah `export function periodLabel(since: string, until: string): string` di `src/shared/period.ts` → `"13–19 Nov 2026"` bila bulan/tahun sama, `"27 Okt – 25 Nov 2026"` bila beda bulan, `"28 Des 2026 – 3 Jan 2027"` bila beda tahun. Format hari tanpa leading zero, bulan singkat `Jan Feb Mar Apr Mei Jun Jul Agu Sep Okt Nov Des`.
-- [ ] Tambah `export function isPartialDay(until: string, timezoneName: string, now: Date = new Date()): boolean` → `true` bila `until === todayInZone(timezoneName)` (hari berjalan belum tutup).
-- [ ] Tambah blok ke setiap response periode di `analytics/service.ts` (`getSummary`, `getFunnel`, `getStageDetail`), `audience/service.ts`, dan `creative/service.ts`:
+- [x] Tambah `export function periodLabel(since: string, until: string): string` di `src/shared/period.ts` → `"13–19 Nov 2026"` bila bulan/tahun sama, `"27 Okt – 25 Nov 2026"` bila beda bulan, `"28 Des 2026 – 3 Jan 2027"` bila beda tahun. Format hari tanpa leading zero, bulan singkat `Jan Feb Mar Apr Mei Jun Jul Agu Sep Okt Nov Des`.
+- [x] Tambah `export function isPartialDay(until: string, timezoneName: string, now: Date = new Date()): boolean` → `true` bila `until === todayInZone(timezoneName)` (hari berjalan belum tutup).
+- [x] Tambah blok ke setiap response periode di `analytics/service.ts` (`getSummary`, `getFunnel`, `getStageDetail`), `audience/service.ts`, dan `creative/service.ts`:
   ```ts
   period: {since, until, days, label, isPartial}
   previousPeriod: {since, until, label}
@@ -26,11 +26,11 @@
   Jangan hapus field lama; ini penambahan.
 
 ### 3. Arah delta
-- [ ] Tambah `export type DeltaDirection = "up" | "down" | "neutral";` dan `export function direction(value: number | null): DeltaDirection | null` di `src/shared/numbers.ts` → `null` bila input `null`, `"neutral"` bila `0`.
-- [ ] Tambah `direction: DeltaDirection | null` di samping setiap `deltaPct` pada `KpiCard` (`analytics/service.ts`) dan di samping setiap `deltaPp`/`changePct` pada `FunnelPair` dan `StageComparisonRow`.
+- [x] Tambah `export type DeltaDirection = "up" | "down" | "neutral";` dan `export function direction(value: number | null): DeltaDirection | null` di `src/shared/numbers.ts` → `null` bila input `null`, `"neutral"` bila `0`.
+- [x] Tambah `direction: DeltaDirection | null` di samping setiap `deltaPct` pada `KpiCard` (`analytics/service.ts`) dan di samping setiap `deltaPp`/`changePct` pada `FunnelPair` dan `StageComparisonRow`.
 
 ### 4. Schema endpoint
-- [ ] Tambah `days: t.Optional(t.Union([t.Literal(7), t.Literal(14), t.Literal(30)]))` pada `AnalyticsSchema.summary`, `.funnel`, `.leakage`, `.stageDetail` (`src/modules/analytics/schema.ts`) dan pada `AudienceSchema.audience`, `.speed`, `.segments`, `.pipeline`, `.conversations` (`src/modules/audience/schema.ts`) serta `CreativeSchema.list`, `.range`, `.experiments` (`src/modules/creative/schema.ts`).
+- [x] Tambah `days: t.Optional(t.Union([t.Literal(7), t.Literal(14), t.Literal(30)]))` pada `AnalyticsSchema.summary`, `.funnel`, `.leakage`, `.stageDetail` (`src/modules/analytics/schema.ts`) dan pada `AudienceSchema.audience`, `.speed`, `.segments`, `.pipeline`, `.conversations` (`src/modules/audience/schema.ts`) serta `CreativeSchema.list`, `.range`, `.experiments` (`src/modules/creative/schema.ts`).
 
 ## File yang Disentuh
 - `src/shared/period.ts`, `src/shared/numbers.ts`
