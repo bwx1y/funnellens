@@ -12,6 +12,7 @@ import {AudienceController, LeadController} from "@/modules/audience";
 import {CreativeController} from "@/modules/creative";
 import {TrackingHealthController} from "@/modules/tracking-health";
 import {AlertsController} from "@/modules/alerts";
+import {InsightController} from "@/modules/insights";
 import {ExplanationController} from "@/modules/explanations";
 import {SearchController} from "@/modules/search";
 import {ReportsController} from "@/modules/reports";
@@ -38,6 +39,7 @@ export const routes = new Elysia({
     .use(CreativeController)
     .use(TrackingHealthController)
     .use(AlertsController)
+    .use(InsightController)
     .use(ExplanationController)
     .use(SearchController)
     .use(ReportsController)

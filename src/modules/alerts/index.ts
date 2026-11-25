@@ -23,7 +23,7 @@ export const AlertsController = new Elysia({
             }
         })
     .get("/",
-        async ({user, query, alertService}) => alertService.list(user.tenantId, query),
+        async ({user, query, alertService}) => alertService.list(user.tenantId, query, user.iss),
         {
             query: AlertsSchema.list,
             detail: {

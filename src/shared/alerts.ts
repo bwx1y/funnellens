@@ -14,6 +14,7 @@ export type AlertRuleKey =
     | "unreplied_hot_lead"
     | "creative_fatigue"
     | "tracking_emq"
+    | "conversation_reconciliation"
     | "sync_failed";
 
 /** The three WhatsApp leakage transitions; the `≈{gap} chat hilang` caption only holds for this channel. */
@@ -33,6 +34,48 @@ export const HOT_LEAD_SCAN_LIMIT = 50;
 
 export const SNOOZE_HOURS = [24, 168] as const;
 export type SnoozeHours = typeof SNOOZE_HOURS[number];
+
+/**
+ * A stable public id for one alert, derived from the rule and the entity it is about — never from the
+ * auto-increment id, so the same alert keeps its key across syncs (and across snapshots of the API).
+ * `entityId` may itself contain a colon; only the first one separates the two halves.
+ */
+export function insightKey(alert: {ruleKey: string; entityId: string}): string {
+    return `${alert.ruleKey}:${alert.entityId}`;
+}
+
+/** Inverse of {@link insightKey}; `null` for a string without the separator. */
+export function parseInsightKey(key: string): {ruleKey: string; entityId: string} | null {
+    const separator = key.indexOf(":");
+    if (separator <= 0) return null;
+
+    return {ruleKey: key.slice(0, separator), entityId: key.slice(separator + 1)};
+}
+
+/** One user's own state on an alert: unread, read (badge cleared), done (out of the active tab). */
+export type ReviewStatus = "read" | "done" | "active";
+export const REVIEW_STATUSES: ReviewStatus[] = ["read", "done", "active"];
+/** Newest first; more than this is history nobody scrolls. */
+export const REVIEW_HISTORY_LIMIT = 50;
+
+/** Meta's own conversation count may differ from ours by attribution lag; only a real gap alerts. */
+export const CONVERSATION_RECONCILIATION_TOLERANCE = 0.1;
+
+/** `difference = meta − observed`; a negative gap means we saw chats Meta never attributed. */
+export function conversationReconciliationGap(input: {
+    metaConversations: number;
+    observedConversations: number;
+}): {difference: number; rate: number | null; breached: boolean} {
+    const difference = input.metaConversations - input.observedConversations;
+    const denominator = Math.max(input.metaConversations, input.observedConversations);
+    const rate = denominator === 0 ? null : Math.abs(difference) / denominator;
+
+    return {
+        difference,
+        rate: rate === null ? null : Math.round(rate * 10_000) / 10_000,
+        breached: rate !== null && rate > CONVERSATION_RECONCILIATION_TOLERANCE,
+    };
+}
 
 /** `null` when the transition did not drop; `≤ −15` CRITICAL; `≤ −5` WARNING. */
 export function leakLevel(deltaPp: number | null): "WARNING" | "CRITICAL" | null {

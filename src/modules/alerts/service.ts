@@ -1,11 +1,17 @@
 import {requireAccountScope} from "@db/repositories/ad-account.repository";
 import {InsightAlertRepository, type InsightAlert} from "@db/repositories/insight-alert.repository";
+import {
+    InsightReviewRepository,
+    type InsightReviewSummary,
+} from "@db/repositories/insight-review.repository";
 import {NotFoundError} from "@shared/errors";
 import {ExplanationService, type ExplanationRef} from "@/modules/explanations/service";
 import {formatNumber} from "@/modules/explanations/rules";
 import {
+    insightKey,
     snoozedUntil,
     type AlertStatusFilter,
+    type ReviewStatus,
     type SnoozeHours,
 } from "@shared/alerts";
 import {pageMeta, resolvePage, type PageMeta} from "@shared/pagination";
@@ -19,6 +25,8 @@ export interface AlertListQuery {
 
 export interface AlertRow {
     id: number;
+    /** Public id derived from (ruleKey, entityId); stable across syncs, never the database row id. */
+    key: string;
     ruleKey: string;
     level: "INFO" | "WARNING" | "CRITICAL";
     title: string;
@@ -36,6 +44,8 @@ export interface AlertRow {
     snoozedUntil: string | null;
     resolvedAt: string | null;
     detectedAt: string;
+    /** The caller's own verdict; `null` until they touch the insight, and always `null` in `toRow`. */
+    review: InsightReviewSummary | null;
 }
 
 export interface AlertListResponse {
@@ -53,9 +63,14 @@ export interface AlertListResponse {
     total: number;
 }
 
-function toRow(alert: InsightAlert): AlertRow {
+/**
+ * Maps one alert row to the API shape. Pure and review-free on purpose: a caller that has the
+ * reviews batch loads them once and attaches them, so mapping a row never costs a query.
+ */
+export function toRow(alert: InsightAlert): AlertRow {
     return {
         id: alert.id,
+        key: insightKey(alert),
         ruleKey: alert.ruleKey,
         level: alert.level,
         title: alert.title,
@@ -73,6 +88,7 @@ function toRow(alert: InsightAlert): AlertRow {
         snoozedUntil: alert.snoozedUntil === null ? null : alert.snoozedUntil.toISOString(),
         resolvedAt: alert.resolvedAt === null ? null : alert.resolvedAt.toISOString(),
         detectedAt: alert.detectedAt.toISOString(),
+        review: null,
     };
 }
 
@@ -80,10 +96,15 @@ function toRow(alert: InsightAlert): AlertRow {
 export class AlertService {
     constructor(
         private readonly alertRepo = new InsightAlertRepository(),
+        private readonly reviewRepo = new InsightReviewRepository(),
         private readonly explanations = new ExplanationService()
     ) {}
 
-    async list(tenantId: string, query: AlertListQuery): Promise<AlertListResponse> {
+    /**
+     * The (`active`|`snoozed`|`resolved`) list. With a `userId` each row carries that user's review
+     * verdict, batch-loaded in one query; without one the field is `null` for every row.
+     */
+    async list(tenantId: string, query: AlertListQuery, userId?: string): Promise<AlertListResponse> {
         await requireAccountScope(tenantId, query.accountId);
 
         const filter = query.status ?? "active";
@@ -118,19 +139,34 @@ export class AlertService {
         });
 
         const mapped = rows.map(toRow);
-        const {page, pageSize} = resolvePage(query.page, query.page_size, mapped.length);
-        const items = mapped.slice((page - 1) * pageSize, page * pageSize);
+        const reviewed = userId === undefined
+            ? mapped
+            : await this.withReviews(tenantId, userId, mapped);
+
+        const {page, pageSize} = resolvePage(query.page, query.page_size, reviewed.length);
+        const items = reviewed.slice((page - 1) * pageSize, page * pageSize);
 
         return {
             items,
-            meta: pageMeta(page, pageSize, mapped.length),
+            meta: pageMeta(page, pageSize, reviewed.length),
             status: filter,
             explanation,
-            alerts: mapped,
+            alerts: reviewed,
             page,
             limit: pageSize,
-            total: mapped.length,
+            total: reviewed.length,
         };
+    }
+
+    /** One batch query for the whole page; rows the user never reviewed keep `review: null`. */
+    protected async withReviews(
+        tenantId: string,
+        userId: string,
+        rows: AlertRow[]
+    ): Promise<AlertRow[]> {
+        const reviews = await this.reviewRepo.listForUser(tenantId, userId, rows.map((row) => row.id));
+
+        return rows.map((row) => ({...row, review: reviews.get(row.id) ?? null}));
     }
 
     async badge(tenantId: string, query: {accountId: string}): Promise<{count: number}> {

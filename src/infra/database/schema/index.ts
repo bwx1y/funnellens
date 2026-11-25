@@ -19,6 +19,7 @@ export * from "./ads/creative-tag.entity";
 export * from "./ads/explanation.entity";
 export * from "./ads/export-audit.entity";
 export * from "./ads/insight-alert.entity";
+export * from "./ads/insight-review.entity";
 export * from "./ads/insight-sync-staging.entity";
 export * from "./ads/meta-connection.entity";
 export * from "./ads/purchase-reconciliation.entity";

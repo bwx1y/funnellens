@@ -6,23 +6,23 @@ Alert sudah punya `ACTIVE`/`DONE`/`SNOOZED` plus `resolve`/`snooze`, tetapi chec
 ## Daftar Pekerjaan
 
 ### 1. Tabel review per user
-- [ ] Tambah tabel `insight_reviews` (`src/infra/database/schema/ads/insight-review.entity.ts`):
+- [x] Tambah tabel `insight_reviews` (`src/infra/database/schema/ads/insight-review.entity.ts`):
   `id bigserial pk`, `tenant_id uuid not null`, `user_id uuid not null references users(id) on delete cascade`, `alert_id bigint not null references insight_alerts(id) on delete cascade`, `status text not null check (status in ('read','done','active')) default 'active'`, `reason text`, `updated_at timestamptz not null default now()`, unik `(user_id, alert_id)`.
-- [ ] Tambah tabel `insight_review_history` (`id`, `insight_review_id` → cascade, `from_status`, `to_status`, `reason`, `changed_by uuid`, `changed_at timestamptz default now()`).
-- [ ] Generate migrasi lewat `bun run db:generate`.
+- [x] Tambah tabel `insight_review_history` (`id`, `insight_review_id` → cascade, `from_status`, `to_status`, `reason`, `changed_by uuid`, `changed_at timestamptz default now()`).
+- [x] Generate migrasi lewat `bun run db:generate`.
 
 ### 2. Key stabil
-- [ ] Tambah `export function insightKey(alert: {ruleKey: string; entityId: string}): string` di `src/shared/alerts.ts` → `` `${ruleKey}:${entityId}` ``.
-- [ ] Tambah `key: string` pada `AlertRow` (`src/modules/alerts/service.ts`), diisi `insightKey(alert)`; key wajib stabil lintas request dan tidak mengandung id auto-increment.
+- [x] Tambah `export function insightKey(alert: {ruleKey: string; entityId: string}): string` di `src/shared/alerts.ts` → `` `${ruleKey}:${entityId}` ``.
+- [x] Tambah `key: string` pada `AlertRow` (`src/modules/alerts/service.ts`), diisi `insightKey(alert)`; key wajib stabil lintas request dan tidak mengandung id auto-increment.
 
 ### 3. Endpoint tab + unread
-- [ ] Buat `InsightController` (`src/modules/insights/index.ts`, prefix `/insights`) atau perluas `AlertsController`; pilih **satu** dan hapus yang lain agar tidak ada dua jalur.
-- [ ] `GET /api/insights?tab=active|done` (`accountId` wajib):
+- [x] Buat `InsightController` (`src/modules/insights/index.ts`, prefix `/insights`) atau perluas `AlertsController`; pilih **satu** dan hapus yang lain agar tidak ada dua jalur.
+- [x] `GET /api/insights?tab=active|done` (`accountId` wajib):
   - `active` = alert `ACTIVE`/`SNOOZED` **dan** review user bukan `done`.
   - `done` = review user `done`, atau alert `DONE` yang belum pernah direview user (tetap tampil supaya riwayat tidak hilang).
   - Respons: `{tab, items: AlertRow[] & {review: {status, reason, updatedAt}}, explanation}`.
-- [ ] `GET /api/insights/unread-count` → `{count: number}` = jumlah alert di tab `active` yang `review.status !== 'read'` **dan** `!== 'done'`.
-- [ ] `PATCH /api/insights/{key}/review` body `{status: "read"|"done"|"active", reason?: string}`:
+- [x] `GET /api/insights/unread-count` → `{count: number}` = jumlah alert di tab `active` yang `review.status !== 'read'` **dan** `!== 'done'`.
+- [x] `PATCH /api/insights/{key}/review` body `{status: "read"|"done"|"active", reason?: string}`:
   - `key` di-resolve ke `alert_id` dengan mencocokkan `insightKey`; tidak ketemu → `404`.
   - `read` → badge hilang, item **tetap** di tab `active`.
   - `done` → item pindah ke tab `done`.
@@ -31,13 +31,13 @@ Alert sudah punya `ACTIVE`/`DONE`/`SNOOZED` plus `resolve`/`snooze`, tetapi chec
   - Respons: `{key, status, updatedAt, unreadCount}`.
 
 ### 4. Idempotency + audit
-- [ ] Wajib header `Idempotency-Key` untuk `PATCH /insights/{key}/review` (plugin dari `23-ops-production.md`); tanpa header → `400` `code: "IDEMPOTENCY_KEY_REQUIRED"`.
-- [ ] Permintaan ulang dengan key sama dan body sama → respons tersimpan, **tidak** ada baris `insight_review_history` baru.
-- [ ] `GET /api/insights/{key}/history` → riwayat review user yang sedang login (maks 50), `{fromStatus, toStatus, reason, changedAt}`.
+- [x] Wajib header `Idempotency-Key` untuk `PATCH /insights/{key}/review` (plugin dari `23-ops-production.md`); tanpa header → `400` `code: "IDEMPOTENCY_KEY_REQUIRED"`.
+- [x] Permintaan ulang dengan key sama dan body sama → respons tersimpan, **tidak** ada baris `insight_review_history` baru.
+- [x] `GET /api/insights/{key}/history` → riwayat review user yang sedang login (maks 50), `{fromStatus, toStatus, reason, changedAt}`.
 
 ### 5. Hubungan dengan status sistem
-- [ ] Status sistem (`ACTIVE`/`DONE`/`SNOOZED` di `insight_alerts`) **tidak** berubah karena review user. `resolveByRuleKey` tetap satu-satunya yang menandai `DONE` secara otomatis.
-- [ ] `GET /api/alerts` (lama) tetap ada; tambahkan `review` pada setiap baris agar konsumen lama tidak kehilangan konteks.
+- [x] Status sistem (`ACTIVE`/`DONE`/`SNOOZED` di `insight_alerts`) **tidak** berubah karena review user. `resolveByRuleKey` tetap satu-satunya yang menandai `DONE` secara otomatis.
+- [x] `GET /api/alerts` (lama) tetap ada; tambahkan `review` pada setiap baris agar konsumen lama tidak kehilangan konteks.
 
 ## File yang Disentuh
 - `src/infra/database/schema/ads/insight-review.entity.ts` (baru), `schema/index.ts`, migrasi

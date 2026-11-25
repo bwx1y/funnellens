@@ -52,6 +52,49 @@ export class InsightAlertRepository extends DatabaseRepository {
         return Number(row.total);
     }
 
+    /**
+     * One tab's alerts, newest first. `open` keeps `ACTIVE` and `SNOOZED` (a pending or expired
+     * snooze is still the user's problem, so it stays visible); `done` is what the evaluator closed.
+     */
+    async findByAccountIdForReview(
+        accountId: string,
+        tab: "open" | "done"
+    ): Promise<InsightAlert[]> {
+        return this.database.select()
+            .from(InsightAlertEntity)
+            .where(and(
+                eq(InsightAlertEntity.accountId, accountId),
+                tab === "done"
+                    ? eq(InsightAlertEntity.status, "DONE")
+                    : ne(InsightAlertEntity.status, "DONE")
+            ))
+            .orderBy(desc(InsightAlertEntity.detectedAt));
+    }
+
+    /**
+     * Resolves a public insight key inside one tenant. The key omits the account, so two accounts of
+     * the same tenant can share it (account-level alerts have an empty `entityId`); the newest row
+     * wins, which is also the row the user most recently saw on their list.
+     */
+    async findByRuleKeyAndEntityIdForTenant(
+        tenantId: string,
+        ruleKey: string,
+        entityId: string
+    ): Promise<InsightAlert | null> {
+        const [row] = await this.database.select({alert: InsightAlertEntity})
+            .from(InsightAlertEntity)
+            .innerJoin(AdAccountEntity, eq(AdAccountEntity.id, InsightAlertEntity.accountId))
+            .where(and(
+                eq(AdAccountEntity.tenantId, tenantId),
+                eq(InsightAlertEntity.ruleKey, ruleKey),
+                eq(InsightAlertEntity.entityId, entityId)
+            ))
+            .orderBy(desc(InsightAlertEntity.detectedAt))
+            .limit(1);
+
+        return row?.alert ?? null;
+    }
+
     /** An alert owned by another tenant is `null`, which the route maps to 404. */
     async findByIdForTenant(id: number, tenantId: string): Promise<InsightAlert | null> {
         const [row] = await this.database.select({alert: InsightAlertEntity})
