@@ -1,0 +1,42 @@
+{
+  "name": "funnel-lens",
+  "version": "1.0.50",
+  "module": "src/index.js",
+  "scripts": {
+    "dev": "bun run --watch src/index.ts",
+    "db:generate": "drizzle-kit generate",
+    "db:push": "drizzle-kit push",
+    "db:drop": "bun run scripts/db-drop.ts",
+    "db:seed": "bun run scripts/seed-demo.ts",
+    "db:backup": "bun run scripts/backup.ts",
+    "db:migrate-secrets": "bun run scripts/migrate-secrets.ts",
+    "db:reset": "bun run scripts/db-drop.ts && drizzle-kit push --force",
+    "db:studio": "drizzle-kit studio"
+  },
+  "dependencies": {
+    "@elysia/openapi": "^1.4.17",
+    "@google/genai": "^3.3.0",
+    "@rmyndharis/openwa": "^0.11.0",
+    "@toon-format/toon": "^4.4.0",
+    "bullmq": "^6.7.1",
+    "drizzle-orm": "^0.45.4",
+    "drizzle-typebox": "^0.3.3",
+    "elysia": "latest",
+    "facebook-nodejs-business-sdk": "^26.0.3",
+    "ioredis": "^6.0.0",
+    "jose": "^6.2.15",
+    "nodemailer": "^10.3.1",
+    "pg": "^8.23.1",
+    "pino": "^10.4.0",
+    "pino-pretty": "^13.2.0",
+    "pino-roll": "^4.0.0",
+    "postgres": "^4.0.0"
+  },
+  "devDependencies": {
+    "@types/facebook-nodejs-business-sdk": "^24.0.0",
+    "@types/nodemailer": "^8.0.2",
+    "bun-types": "^1.4.4",
+    "drizzle-kit": "^0.31.11",
+    "@types/pg": "^8.23.1"
+  }
+}
