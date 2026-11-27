@@ -13,7 +13,8 @@ export const Config = {
         mode: getEnv("NODE_ENV", "development"),
         port: parseInt(getEnv("PORT", "3000")),
         secret: getEnv("SECRET", "super_secret_default_key"),
-        cors: getEnv("CORS", "localhost"),
+        cors: getEnv("CORS", "localhost,127.0.0.1"),
+        frontendUrl: getEnv("FRONTEND_URL", "http://127.0.0.1:5173"),
     },
     email: {
         host: getEnv("SMTP_HOST", "localhost"),
@@ -30,7 +31,7 @@ export const Config = {
         db: parseInt(getEnv("REDIS_DB", "0")),
     },
     openWa: {
-        url: getEnv("OPEN_WA_URL", "localhost"),
+        url: getEnv("OPEN_WA_URL", "http://localhost:2785"),
         appKey: getEnv("OPEN_WA_APP_KEY", "localhost"),
         // Must be reachable from the OpenWA container, not from the host: host.docker.internal is the
         // host-gateway alias configured under open_wa.extra_hosts in docker-compose.yml.

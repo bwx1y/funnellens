@@ -361,8 +361,6 @@ export class FacebookSdkAdapter implements IMetaAdsAdapter, IMetaAdStudiesAdapte
             "video_p75_watched_actions",
             "video_p100_watched_actions",
             "video_avg_time_watched_actions",
-            "action_report_time",
-            "video_3_sec_watched_actions",
         ];
 
         const params = {

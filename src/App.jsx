@@ -1,17 +1,17 @@
 import React, { useEffect, useState } from 'react';
 import { Navigate, NavLink, Link, Outlet, Route, Routes, useLocation, useNavigate } from 'react-router-dom';
 import {
-  Activity, ArrowRight, Bell, BookOpen, Building2, ChartNoAxesCombined,
-  ChevronDown, CircleHelp, Command, FileText, Home, Image, Layers,
-  Menu, MessageCircle, PanelLeftClose, Search, Settings2, SlidersHorizontal,
-  Sparkles, Target, TrendingUp, Users, X
+  ArrowRight, Bell, Building2, ChartNoAxesCombined,
+  ChevronDown, CircleHelp, FileText, Home, Image, Layers,
+  Menu, Search, Settings2, SlidersHorizontal,
+  Sparkles, Target, TrendingUp, Users
 } from 'lucide-react';
 import { WorkspaceProvider, useWorkspace } from './context.jsx';
 import { AuthProvider, useAuth } from './auth.jsx';
 import Login from './pages/Login.jsx';
 import Landing from './pages/Landing.jsx';
-import { Badge, Button, Logo, Modal, Notice, SearchInput, ToastProvider, useToast } from './components/ui.jsx';
-import { CAMPAIGNS, CREATIVES, INSIGHTS, LEADS } from './lib/data.js';
+import { Badge, Button, Logo, Modal, Notice, SearchInput, ToastProvider } from './components/ui.jsx';
+import { apiRequest } from './lib/supabase.js';
 import Onboarding from './pages/Onboarding.jsx';
 import Overview from './pages/Overview.jsx';
 import Funnel from './pages/Funnel.jsx';
@@ -22,63 +22,48 @@ import Insights from './pages/Insights.jsx';
 import Strategy from './pages/Strategy.jsx';
 import Business from './pages/Business.jsx';
 import { Controls, Integrations } from './pages/Utilities.jsx';
-import ReferenceDashboard from './reference/ReferenceDashboard.jsx';
+import {
+  ComparisonPage, ConversationsPage, FatiguePage, LeakagePage,
+  PipelinePage, QualityPage, ReportsPage, SpeedPage, TrackingPage,
+} from './pages/IntelSubpages.jsx';
+import { APP_PAGE_GROUPS, APP_SECONDARY_NAV } from './lib/navigation.js';
 
-/* ── Navigation structure ─────────────────────────────────────── */
 const NAV = [
   { path: 'overview', label: 'Ringkasan', icon: Home },
-  { path: 'funnel', label: 'Ikhtisar funnel', icon: ChartNoAxesCombined },
-  { path: 'audience', label: 'Daftar lead', icon: Users },
+  ...APP_PAGE_GROUPS.flatMap(group => group.items),
+  ...APP_SECONDARY_NAV,
   { path: 'campaigns', label: 'Campaign & Budget', icon: Layers },
-  { path: 'creative', label: 'Analisis kreatif', icon: Image },
-  { path: 'insights', label: 'Peringatan', icon: Sparkles },
-  { path: 'strategy', label: 'Strategi', icon: Target },
+  { path: 'strategy', label: 'Strategy & Recalibration', icon: Target },
   { path: 'business', label: 'Business Impact', icon: TrendingUp },
   { path: 'controls', label: 'Campaign Controls', icon: SlidersHorizontal },
-  { path: 'integrations', label: 'Pengaturan', icon: Settings2 },
+  { path: 'integrations', label: 'Integrations & Data', icon: Settings2 },
 ];
 
 const NAV_GROUPS = [
-  {
-    label: 'Funnel Intelligence',
-    icon: ChartNoAxesCombined,
-    items: [{ path: 'funnel', label: 'Ikhtisar funnel' }],
-  },
-  {
-    label: 'Audience Intelligence',
-    icon: Users,
-    items: [{ path: 'audience', label: 'Daftar lead' }],
-  },
-  {
-    label: 'Creative Intelligence',
-    icon: Image,
-    items: [{ path: 'creative', label: 'Analisis kreatif' }],
-  },
+  ...APP_PAGE_GROUPS.map((group, index) => ({
+    ...group,
+    icon: [ChartNoAxesCombined, Users, Image][index],
+  })),
 ];
 
-/* ── Helper components ────────────────────────────────────────── */
-function Start() {
-  const { workspace } = useWorkspace(), { session } = useAuth();
-  return <Navigate to={!session ? '/login' : workspace.onboarding.completed ? '/app/overview' : '/onboarding/1'} replace/>;
-}
-
 function Protected() {
-  const { session, ready } = useAuth(), location = useLocation();
-  if (!ready) return <div className="auth-loading">Memeriksa sesi Supabase…</div>;
+  const { session, ready } = useAuth();
+  const location = useLocation();
+  if (!ready) return <div className="auth-loading">Memeriksa sesi…</div>;
   return session ? <Outlet/> : <Navigate to="/login" state={{ from: location.pathname }} replace/>;
 }
 
 function SavedDraft() {
-  const { workspace, connected } = useWorkspace();
+  const { workspace } = useWorkspace();
   return (
     <div className="welcome">
       <Logo/>
-      <Badge color="teal">{connected ? 'Draft tersimpan di Supabase' : 'Draft tersimpan di browser'}</Badge>
+      <Badge color="teal">Workspace tersimpan</Badge>
       <h1>Lanjutkan saat Anda siap.</h1>
-      <p>{connected ? 'Profil bisnis dan rencana campaign tersimpan di workspace Supabase.' : 'Profil bisnis dan rencana campaign Anda tetap tersedia di perangkat ini.'}</p>
+      <p>Profil bisnis dan pengaturan campaign Anda tersedia di workspace ini.</p>
       <div className="flex center">
         <Link className="btn btn-primary" to={`/onboarding/${workspace.onboarding.maxStep}`}>Lanjut onboarding <ArrowRight size={17}/></Link>
-        <Link className="btn btn-secondary" to="/app/overview">Jelajahi insight demo</Link>
+        <Link className="btn btn-secondary" to="/app/overview">Buka dashboard</Link>
       </div>
     </div>
   );
@@ -87,17 +72,12 @@ function SavedDraft() {
 function GlobalSearch({ open, onClose }) {
   const [query, setQuery] = useState('');
   const navigate = useNavigate();
-  const all = [
-    ...NAV.map(n => ({ title: n.label, type: 'Halaman', route: `/app/${n.path}` })),
-    ...CAMPAIGNS.map(c => ({ title: c.name, type: 'Campaign', route: `/app/campaigns?select=${c.id}` })),
-    ...CREATIVES.map(c => ({ title: c.name, type: 'Creative', route: `/app/creative?select=${c.id}` })),
-    ...INSIGHTS.map(i => ({ title: i.title, type: 'Insight', route: `/app/insights?select=${i.id}` })),
-    ...LEADS.slice(0, 10).map(l => ({ title: l.name, type: 'Lead demo', route: `/app/audience?lead=${l.id}&source=${l.source}` })),
-  ];
-  const list = all.filter(i => !query || i.title.toLowerCase().includes(query.toLowerCase())).slice(0, 12);
+  const pages = NAV.map(n => ({ title: n.label, type: 'Halaman', route: `/app/${n.path}` }));
+  const list = pages.filter(i => !query || i.title.toLowerCase().includes(query.toLowerCase())).slice(0, 12);
+
   return (
     <Modal open={open} onClose={onClose} title="Cari di workspace">
-      <SearchInput value={query} onChange={setQuery} placeholder="Halaman, campaign, creative, atau lead…" autoFocus/>
+      <SearchInput value={query} onChange={setQuery} placeholder="Cari halaman…" autoFocus/>
       <div className="search-results">
         {list.map((i, idx) => (
           <button key={`${i.title}-${idx}`} onClick={() => { navigate(i.route); onClose(); setQuery(''); }}>
@@ -112,16 +92,26 @@ function GlobalSearch({ open, onClose }) {
   );
 }
 
-/* ── Shell (main app layout) ──────────────────────────────────── */
 function Shell() {
-  const { workspace, storageError } = useWorkspace();
+  const { workspace, patch, storageError } = useWorkspace();
+  const { session, signOut } = useAuth();
   const [mobile, setMobile] = useState(false);
   const [search, setSearch] = useState(false);
   const [notifications, setNotifications] = useState(false);
   const [profile, setProfile] = useState(false);
   const [help, setHelp] = useState(false);
-  const { signOut } = useAuth();
-  const location = useLocation(), navigate = useNavigate();
+  const [alerts, setAlerts] = useState([]);
+  const [campaigns, setCampaigns] = useState([]);
+  const [expandedGroups, setExpandedGroups] = useState({
+    funnel: true,
+    audience: true,
+    creative: true,
+  });
+
+  const location = useLocation();
+  const navigate = useNavigate();
+  const current = NAV.find(n => location.pathname === `/app/${n.path}`);
+
   useEffect(() => { setMobile(false); setProfile(false); setNotifications(false); window.scrollTo(0, 0); }, [location.pathname]);
   useEffect(() => {
     const key = e => { if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') { e.preventDefault(); setSearch(v => !v); } };
@@ -129,18 +119,45 @@ function Shell() {
     return () => window.removeEventListener('keydown', key);
   }, []);
 
-  const brand = workspace.brand.name || 'Demo Workspace';
+  useEffect(() => {
+    let cancelled = false;
+    const loadHeaderData = async () => {
+      try {
+        const [alertsResult, summary] = await Promise.all([
+          apiRequest('/api/alerts?status=active'),
+          apiRequest('/api/analytics/summary'),
+        ]);
+        if (cancelled) return;
+        const nextCampaigns = summary?.campaigns || [];
+        setAlerts(alertsResult?.items || alertsResult?.alerts || []);
+        setCampaigns(nextCampaigns);
+        const selected = workspace.preferences.campaign;
+        if (selected !== 'all' && !nextCampaigns.some(c => (c.campaignId || c.id) === selected)) {
+          patch('preferences', { campaign: 'all' });
+        }
+      } catch {
+        if (!cancelled) {
+          setAlerts([]);
+          setCampaigns([]);
+        }
+      }
+    };
+    loadHeaderData();
+    window.addEventListener('funnellens:account-changed', loadHeaderData);
+    return () => {
+      cancelled = true;
+      window.removeEventListener('funnellens:account-changed', loadHeaderData);
+    };
+  }, [workspace.preferences.campaign, patch]);
+
+  const brand = workspace.brand.name || session?.user?.tenant?.name || 'Workspace';
 
   return (
     <div className="app-shell">
       <a className="skip-link" href="#main" onClick={e => { e.preventDefault(); document.getElementById('main')?.focus(); }}>Langsung ke konten</a>
-
-      {/* Sidebar overlay (mobile) */}
       {mobile && <div className="sidebar-overlay" onClick={() => setMobile(false)}/>}
 
-      {/* ── Sidebar ──────────────────────────────────────────────── */}
       <aside className={`sidebar ${mobile ? 'open' : ''}`}>
-        {/* Logo */}
         <Link to="/app/overview" className="brand-link">
           <span className="brand-icon">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -150,25 +167,34 @@ function Shell() {
           <span>FunnelLens</span>
         </Link>
 
-        {/* Workspace badge */}
         <div className="workspace-id">
           <span className="workspace-avatar">{brand[0].toUpperCase()}</span>
           <div>
             <strong>{brand}</strong>
-            <small>{workspace.business.name || 'Workspace baru'}</small>
+            <small>{session?.user?.email || 'Workspace aktif'}</small>
           </div>
         </div>
 
-        {/* Primary nav — grouped */}
         <nav aria-label="Navigasi utama">
-          <NavLink to="/app/overview" className={({ isActive }) => `nav-link ${isActive ? 'selected' : ''}`}>
+          <NavLink to="/app/overview" end className={({ isActive }) => `nav-link ${isActive ? 'selected' : ''}`}>
             <Home size={17}/>
             <span>Ringkasan</span>
           </NavLink>
 
-          <span className="sidebar-caption separate">Analisis</span>
+          <span className="sidebar-caption">Analisis</span>
           {NAV_GROUPS.map(group => (
-            <details key={group.label} className="nav-group" open>
+            <details
+              key={group.label}
+              className="nav-group"
+              open={expandedGroups[group.key]}
+              onToggle={event => {
+                const isOpen = event.currentTarget.open;
+                setExpandedGroups(current => ({
+                  ...current,
+                  [group.key]: isOpen,
+                }));
+              }}
+            >
               <summary>
                 <group.icon size={17}/>
                 <span>{group.label}</span>
@@ -176,11 +202,7 @@ function Shell() {
               </summary>
               <div className="nav-children">
                 {group.items.map(item => (
-                  <NavLink
-                    key={item.path}
-                    to={`/app/${item.path}`}
-                    className={({ isActive }) => isActive ? 'active' : ''}
-                  >
+                  <NavLink key={item.path} to={`/app/${item.path}`} end className={({ isActive }) => isActive ? 'active' : ''}>
                     {item.label}
                   </NavLink>
                 ))}
@@ -189,58 +211,70 @@ function Shell() {
           ))}
         </nav>
 
-        {/* Divider */}
         <div className="nav-divider"/>
 
-        {/* Secondary nav */}
-        <nav aria-label="Utilitas">
-          {NAV.filter(item => ['campaigns', 'insights', 'strategy', 'business', 'controls', 'integrations'].includes(item.path)).map(({ path, label, icon: Icon }) => (
-            <NavLink key={path} to={`/app/${path}`} className={({ isActive }) => `nav-link ${isActive ? 'selected' : ''}`}>
-              <Icon size={17}/>
-              <span>{label}</span>
-            </NavLink>
-          ))}
+        <nav aria-label="Menu lainnya">
+          {APP_SECONDARY_NAV.map((item, index) => {
+            const Icon = [Bell, FileText, Settings2][index];
+            return (
+              <NavLink key={item.path} to={`/app/${item.path}`} end className={({ isActive }) => `nav-link ${isActive ? 'selected' : ''}`}>
+                <Icon size={16}/>
+                <span>{item.label}</span>
+                {item.path === 'insights' && alerts.length > 0 && (
+                  <span className="nav-count">{alerts.length > 99 ? '99+' : alerts.length}</span>
+                )}
+              </NavLink>
+            );
+          })}
         </nav>
 
-        {/* Sidebar bottom */}
         <div className="sidebar-bottom">
-          <div className="local-note">
-            <span className="status-dot"/>
-            Supabase · owner workspace
-          </div>
-          <button className="workspace-pill" onClick={() => navigate('/app/integrations')}>
-            <span className="avatar" style={{ borderRadius: '7px' }}>{brand[0].toUpperCase()}</span>
-            <span>
-              <strong>{brand}</strong>
-              <small>{workspace.business.name || 'Workspace baru'}</small>
-            </span>
-            <ChevronDown size={14}/>
-          </button>
           <button className="help-link" onClick={() => setHelp(true)}>
-            <CircleHelp size={16}/> Panduan
+            <CircleHelp size={16}/> Tentang FunnelLens
           </button>
         </div>
       </aside>
 
-      {/* ── Main area ─────────────────────────────────────────────── */}
       <div className="app-main">
-        {/* Topbar */}
         <header className="topbar">
           <button className="icon-btn mobile-menu" aria-label="Buka navigasi" onClick={() => setMobile(true)}>
             <Menu size={21}/>
           </button>
 
-          <button className="global-search-btn" aria-label="Cari halaman atau lead" onClick={() => setSearch(true)}>
-            <Search size={15}/><span>Cari halaman atau lead</span><kbd>Ctrl K</kbd>
-          </button>
+          <div className="topbar-context">
+            <div className="breadcrumb">
+              Workspace <span>/</span> <strong>{current?.label || (location.pathname.includes('controls') ? 'Campaign Controls' : 'Integrations & Data')}</strong>
+            </div>
 
-          {/* Right actions */}
-          <div className="topbar-actions">
-            <button className="account-switcher" onClick={() => navigate('/app/integrations')} aria-label="Kelola akun iklan">
-              <Layers size={18}/><span><small>Akun iklan</small><strong>{workspace.meta.account || brand}</strong></span><ChevronDown size={14}/>
+            <button className="global-search-btn" aria-label="Cari di workspace" onClick={() => setSearch(true)}>
+              <Search size={15}/>
+              <span>Cari di workspace</span>
+              <kbd>⌘ K</kbd>
             </button>
+          </div>
 
-            {/* Notifications */}
+          <div className="topbar-actions">
+            <select
+              className="top-select"
+              aria-label="Periode"
+              value={workspace.preferences.period || '30'}
+              onChange={e => patch('preferences', { period: e.target.value })}
+            >
+              <option value="7">7 hari terakhir</option>
+              <option value="14">14 hari terakhir</option>
+              <option value="30">30 hari terakhir</option>
+            </select>
+
+            <select
+              className="top-select campaign-global"
+              aria-label="Campaign global"
+              value={workspace.preferences.campaign}
+              onChange={e => patch('preferences', { campaign: e.target.value })}
+            >
+              <option value="all">Semua campaign</option>
+              {campaigns.map(c => <option key={c.campaignId || c.id} value={c.campaignId || c.id}>{c.name}</option>)}
+            </select>
+
             <div className="popover-anchor">
               <button
                 className="icon-btn notification-btn"
@@ -248,22 +282,21 @@ function Shell() {
                 onClick={() => { setNotifications(v => !v); setProfile(false); }}
               >
                 <Bell size={18}/>
-                <i/>
+                {alerts.length > 0 && <i/>}
               </button>
               {notifications && (
                 <div className="popover notifications">
-                  <h3>Insight demo</h3>
-                  {INSIGHTS.map(i => (
-                    <Link key={i.id} to={`/app/insights?select=${i.id}`}>
+                  <h3>Peringatan</h3>
+                  {alerts.length ? alerts.slice(0, 5).map(a => (
+                    <Link key={a.id} to="/app/insights">
                       <Sparkles size={15}/>
-                      <span>{i.title}<small>Periksa data contoh</small></span>
+                      <span>{a.title}<small>{a.severity || 'Info'}</small></span>
                     </Link>
-                  ))}
+                  )) : <p className="muted small">Belum ada peringatan aktif.</p>}
                 </div>
               )}
             </div>
 
-            {/* Avatar / profile */}
             <div className="popover-anchor">
               <button
                 className="avatar"
@@ -275,7 +308,7 @@ function Shell() {
               {profile && (
                 <div className="popover">
                   <strong>{brand}</strong>
-                  <small>Data tersimpan di Supabase</small>
+                  <small>{session?.user?.email}</small>
                   <Link to="/onboarding/1"><Building2 size={15}/> Edit profil</Link>
                   <Link to="/app/integrations"><Settings2 size={15}/> Integrasi</Link>
                   <button onClick={async () => { await signOut(); navigate('/login'); }}>Keluar</button>
@@ -285,40 +318,33 @@ function Shell() {
           </div>
         </header>
 
-        {/* Page content */}
         <main id="main" tabIndex={-1} className="page-canvas">
-          {storageError && (
-            <Notice tone="amber">{storageError} <Link to="/app/integrations">Kelola data</Link></Notice>
-          )}
+          {storageError && <Notice tone="amber">{storageError}</Notice>}
           <Outlet/>
         </main>
 
         <footer className="app-footer">
-          <span>FunnelLens</span>
-          <span>Revisi UI · Data simulasi</span>
+          <span><span className="status-dot"/> FunnelLens · Production Workspace</span>
+          <span>Meta Ads &amp; WhatsApp Intelligence</span>
         </footer>
       </div>
 
-      {/* Modals */}
       <GlobalSearch open={search} onClose={() => setSearch(false)}/>
-      <Modal open={help} onClose={() => setHelp(false)} title="Panduan mencoba FunnelLens">
+      <Modal open={help} onClose={() => setHelp(false)} title="Tentang FunnelLens">
         <div className="stack">
-          <p>Mulai dari onboarding untuk menyimpan profil, memilih brand, dan mensimulasikan campaign pertama.</p>
-          <Notice>Semua metrik insight adalah data dummy. Tombol koneksi, AI, budget, dan pengiriman hanya mengubah simulasi lokal.</Notice>
+          <p>Hubungkan akun Meta Ads melalui OAuth dan sesi WhatsApp OpenWA di halaman Integrations &amp; Data untuk mulai menarik data asli.</p>
           <ul className="readable-list">
-            <li>Ubah campaign dan periode melalui filter di atas.</li>
-            <li>Klik tahap, baris lead, atau creative untuk membuka bukti.</li>
-            <li>Gunakan Integrations &amp; Data untuk ekspor, impor, atau reset workspace.</li>
-            <li>Tekan Ctrl/⌘ + K untuk pencarian global.</li>
+            <li>Buka <strong>Integrations &amp; Data</strong> untuk menghubungkan Meta OAuth dan memilih Ad Account.</li>
+            <li>Gunakan filter periode dan campaign di bagian atas untuk memfilter metrik.</li>
+            <li>Tekan Ctrl/⌘ + K untuk pencarian cepat.</li>
           </ul>
-          <Button onClick={() => { setHelp(false); navigate('/onboarding/1'); }}>Buka onboarding</Button>
+          <Button onClick={() => { setHelp(false); navigate('/app/integrations'); }}>Buka Integrations &amp; Data</Button>
         </div>
       </Modal>
     </div>
   );
 }
 
-/* ── Root app ─────────────────────────────────────────────────── */
 export default function App() {
   return (
     <AuthProvider>
@@ -330,10 +356,29 @@ export default function App() {
             <Route element={<Protected/>}>
               <Route path="/saved" element={<SavedDraft/>}/>
               <Route path="/onboarding/:step" element={<Onboarding/>}/>
-              <Route path="/app/integrations" element={<Shell/>}>
-                <Route index element={<Integrations/>}/>
+              <Route path="/app" element={<Shell/>}>
+                <Route index element={<Navigate to="overview" replace/>}/>
+                <Route path="overview" element={<Overview/>}/>
+                <Route path="funnel" element={<Funnel/>}/>
+                <Route path="funnel/leakage" element={<LeakagePage/>}/>
+                <Route path="audience" element={<Audience/>}/>
+                <Route path="audience/speed" element={<SpeedPage/>}/>
+                <Route path="audience/pipeline" element={<PipelinePage/>}/>
+                <Route path="audience/conversations" element={<ConversationsPage/>}/>
+                <Route path="tracking" element={<TrackingPage/>}/>
+                <Route path="campaigns" element={<Campaign/>}/>
+                <Route path="creative" element={<Creative/>}/>
+                <Route path="creative/fatigue" element={<FatiguePage/>}/>
+                <Route path="creative/quality" element={<QualityPage/>}/>
+                <Route path="creative/compare" element={<ComparisonPage/>}/>
+                <Route path="insights" element={<Insights/>}/>
+                <Route path="reports" element={<ReportsPage/>}/>
+                <Route path="settings" element={<Integrations/>}/>
+                <Route path="strategy" element={<Strategy/>}/>
+                <Route path="business" element={<Business/>}/>
+                <Route path="controls" element={<Controls/>}/>
+                <Route path="integrations" element={<Integrations/>}/>
               </Route>
-              <Route path="/app/*" element={<ReferenceDashboard/>}/>
             </Route>
             <Route path="*" element={<Navigate to="/" replace/>}/>
           </Routes>

@@ -1,44 +1,88 @@
-import React, { useEffect, useMemo, useState } from 'react';
-import { useSearchParams } from 'react-router-dom';
-import { CheckCircle2, ChevronRight, Eye, EyeOff, FileText, GitBranch, MessageCircle, Pencil, Plus, UserRound, X } from 'lucide-react';
+import React, { useEffect, useState } from 'react';
+import { Link } from 'react-router-dom';
+import { Users } from 'lucide-react';
 import { useWorkspace } from '../context.jsx';
-import { Badge, Button, EmptyState, ExportButton, Field, Input, Modal, Notice, PageHead, Pagination, Panel, SearchInput, Select, Tabs, useToast } from '../components/ui.jsx';
-import { CAMPAIGNS, LEADS, applyLeadOverrides, campaignName, levelColor } from '../lib/data.js';
-import { csv, download, number } from '../lib/domain.js';
+import { Badge, EmptyState, PageHead, Panel, SearchInput, SectionHead } from '../components/ui.jsx';
 import { apiRequest } from '../lib/supabase.js';
 
-function StoredLeadSummary() {
-  const [leads, setLeads] = useState([]), [error, setError] = useState('');
-  useEffect(() => { let cancelled = false; apiRequest('/api/leads').then(result => { if (!cancelled) setLeads(result.leads); }).catch(reason => { if (!cancelled) setError(reason.message); }); return () => { cancelled = true; }; }, []);
-  return <Panel><div className="section-head"><div><h2>Lead tersimpan di Supabase</h2><p className="muted small">Data produksi dari form LP dan webhook WhatsApp, dengan kontak dimasking.</p></div><Badge color="teal">{leads.length} lead</Badge></div>{error ? <Notice tone="amber">Belum dapat memuat lead database: {error}</Notice> : leads.length ? <div className="table-scroll"><table><thead><tr><th>Kontak</th><th>Sumber</th><th>Intent / tahap</th><th>Sinyal terakhir (masked)</th><th>Diterima</th></tr></thead><tbody>{leads.map(lead => <tr key={lead.id}><td><strong>{lead.nameMasked || 'Lead'}</strong><small className="cell-caption">{lead.phoneHint}</small></td><td>{lead.source === 'whatsapp' ? 'WhatsApp' : 'Landing Page'}</td><td>{lead.intent} / {lead.stage}</td><td>{lead.signal || '—'}</td><td>{new Date(lead.firstReceivedAt).toLocaleString('id-ID')}</td></tr>)}</tbody></table></div> : <EmptyState title="Belum ada lead produksi" description="Lead dari form dengan consent atau pesan WhatsApp masuk akan muncul di sini."/>}</Panel>;
-}
 export default function Audience() {
-  const { workspace: w, patch } = useWorkspace(), toast = useToast(), [params, setParams] = useSearchParams();
-  const initialLead = LEADS.find(l => l.id === params.get('lead'));
-  const [campaign, setCampaign] = useState(initialLead?.campaign || (w.preferences.campaign === 'all' ? 'prospecting' : w.preferences.campaign)), [source, setSource] = useState(initialLead?.source || params.get('source') || 'wa'), [level, setLevel] = useState('all'), [query, setQuery] = useState(''), [sort, setSort] = useState('intent'), [page, setPage] = useState(1), [selectedId, setSelectedId] = useState(initialLead?.id || 'lead-0-28'), [reveal, setReveal] = useState(false), [classify, setClassify] = useState(null), [historyOpen, setHistoryOpen] = useState(false), [note, setNote] = useState('');
-  const all = applyLeadOverrides(LEADS, w.leadOverrides);
-  const scope = all.filter(l => campaign === 'all' || l.campaign === campaign);
-  const sourceRows = scope.filter(l => l.source === source);
-  const stage = params.has('stage') ? Number(params.get('stage')) : null;
-  const filtered = sourceRows.filter(l => (level === 'all' || l.level === level) && (!query || `${l.name} ${l.phone}`.toLowerCase().includes(query.toLowerCase())) && (stage === null || l.stage === stage)).sort((a, b) => sort === 'name' ? a.name.localeCompare(b.name) : sort === 'newest' ? b.date.localeCompare(a.date) : ['Hot', 'Warm', 'Cold'].indexOf(a.level) - ['Hot', 'Warm', 'Cold'].indexOf(b.level));
-  const selected = filtered.find(l => l.id === selectedId) || filtered[0], original = selected && LEADS.find(l => l.id === selected.id);
-  const pages = Math.max(1, Math.ceil(filtered.length / 8)), visible = filtered.slice((Math.min(page, pages) - 1) * 8, Math.min(page, pages) * 8);
-  const mask = phone => reveal ? phone : `${phone.slice(0, 4)}-••••-${phone.slice(-4)}`;
-  useEffect(() => { if (w.preferences.campaign !== 'all') setCampaign(w.preferences.campaign); setPage(1); }, [w.preferences.campaign]);
-  useEffect(() => { const lead = LEADS.find(l => l.id === params.get('lead')); if (lead) { setCampaign(lead.campaign); setSource(lead.source); setSelectedId(lead.id); setLevel('all'); setQuery(''); } }, [params]);
-  useEffect(() => { setPage(1); }, [campaign, source, level, query, sort, stage]);
-  useEffect(() => { if (campaign === 'wa') setSource('wa'); }, [campaign]);
-  const exportLeads = () => { download(`funnellens-leads-${source}.csv`, csv([['Nama', 'Nomor HP', 'Level', 'Campaign', 'Sumber', 'Sinyal'], ...filtered.map(l => [l.name, mask(l.phone), l.level, campaignName(l.campaign), l.source, l.signal])]), 'text/csv;charset=utf-8'); toast('Lead pada filter aktif diekspor.'); };
-  const saveClassification = () => {
-    if (!classify.reason.trim()) { toast('Isi alasan peninjauan klasifikasi.', 'error'); return; }
-    patch('leadOverrides', p => ({ ...p, [selected.id]: { level: classify.level, reason: classify.reason, reviewed: new Date().toISOString() } }));
-    setClassify(null); toast('Klasifikasi demo diperbarui dan disimpan lokal.');
-  };
-  return <div className="stack"><PageHead eyebrow="AUDIENCE & LEAD INTELLIGENCE" filters={false} title="Pahami lead dari setiap jalur campaign." description="Nama, kontak, dan level audiens berdasarkan sinyal chat atau jawaban form." action={<ExportButton onClick={exportLeads}/>}/><StoredLeadSummary/><div className="context-row"><Select aria-label="Campaign analisis lead" value={campaign} onChange={e => { setCampaign(e.target.value); setParams({}); }}><option value="all">Semua campaign demo</option>{CAMPAIGNS.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}</Select><Badge><GitBranch size={14}/> Jalur aktif: {campaign === 'wa' ? 'WhatsApp' : 'WhatsApp + LP'}</Badge><span className="muted small">Cohort lead baru: 24–30 Sep · kontak dideduplikasi</span></div>
-    <Tabs label="Sumber lead" value={source} onChange={s => { setSource(s); setParams({ source: s }); }} options={[{ value: 'wa', label: 'WhatsApp', icon: MessageCircle, count: scope.filter(l => l.source === 'wa').length }, ...(campaign !== 'wa' ? [{ value: 'lp', label: 'Landing Page', icon: FileText, count: scope.filter(l => l.source === 'lp').length }] : [])]}/>
-    <div className="lead-summary"><strong>{sourceRows.length} lead {source === 'wa' ? 'WhatsApp' : 'form'}</strong>{['Cold', 'Warm', 'Hot'].map(l => <span key={l}><i className={`bg-${levelColor(l)}`}/>{l} <strong>{sourceRows.filter(r => r.level === l).length}</strong></span>)}<span className="muted small push-right">Sumber pertama = primary origin</span></div>{stage !== null && <Notice>Filter sampel tahap {['TOFU', 'MOFU', 'BOFU', 'Action'][stage] || stage} aktif. Unit lead ini berbeda dari profil tertaut di halaman Funnel. <Button variant="ghost" icon={X} onClick={() => setParams({ source })}>Hapus filter tahap</Button></Notice>}
-    <div className="grid grid-leads"><Panel className="lead-table-panel"><div className="table-toolbar"><SearchInput value={query} onChange={setQuery} placeholder="Cari nama atau nomor…"/><Select aria-label="Filter level audiens" value={level} onChange={e => setLevel(e.target.value)}><option value="all">Semua level</option>{['Cold', 'Warm', 'Hot'].map(l => <option key={l}>{l}</option>)}</Select><Select aria-label="Urutan lead" value={sort} onChange={e => setSort(e.target.value)}><option value="intent">Niat tertinggi</option><option value="newest">Terbaru</option><option value="name">Nama A–Z</option></Select><Button variant="ghost" icon={reveal ? EyeOff : Eye} onClick={() => setReveal(v => !v)}>{reveal ? 'Samarkan' : 'Lihat nomor'}</Button></div><div className="table-scroll"><table><thead><tr><th>Nama</th><th>Nomor HP</th><th>Level</th><th>{source === 'wa' ? 'Sinyal chat' : 'Sinyal form'}</th><th/></tr></thead><tbody>{visible.map(l => <tr key={l.id} className={selected?.id === l.id ? 'selected-row' : ''} onClick={() => setSelectedId(l.id)}><td><button className="table-link" onClick={() => setSelectedId(l.id)}>{l.name}</button><small className="cell-caption">{campaignName(l.campaign)}{l.linked ? ' · touchpoint LP + WA' : ''}</small></td><td className="phone-cell">{mask(l.phone)}</td><td><Badge color={levelColor(l.level)} dot>{l.level}</Badge>{w.leadOverrides[l.id] && <small className="cell-caption">Ditinjau manual</small>}</td><td className="signal-cell">{l.signal}</td><td><ChevronRight size={16}/></td></tr>)}</tbody></table>{!visible.length && <EmptyState title="Tidak ada lead sesuai filter" description="Ubah pencarian, level, atau sumber lead." action={<Button variant="secondary" onClick={() => { setQuery(''); setLevel('all'); setParams({ source }); }}>Reset filter</Button>}/>}</div><Pagination page={Math.min(page, pages)} pages={pages} onChange={setPage} total={filtered.length} size={8}/></Panel><Panel className="lead-inspector">{selected ? <div className="stack"><div className="flex between"><h2>{selected.name}</h2><Badge color="gray">Bukti demo</Badge></div><div className="flex wrap"><Badge color={levelColor(selected.level)} dot>{selected.level}</Badge><span className="small">berdasarkan {source === 'wa' ? 'chat' : 'jawaban form'}</span></div>{source === 'wa' ? <div className="chat-evidence"><blockquote>{selected.signal}.</blockquote><small>{selected.date} · 10:12</small>{original.level === 'Hot' && <><blockquote>Bagaimana proses pemesanannya?</blockquote><small>{selected.date} · 10:15</small></>}</div> : <div className="form-evidence"><dl><dt>Form</dt><dd>{original.level === 'Hot' ? 'Permintaan penawaran' : 'Minat produk'}</dd><dt>Kebutuhan</dt><dd>{selected.signal}</dd><dt>Waktu</dt><dd>{original.level === 'Hot' ? 'Minggu ini' : 'Belum pasti'}</dd><dt>Kontak</dt><dd>{mask(selected.phone)}</dd></dl></div>}<Notice>{w.leadOverrides[selected.id] ? <><strong>Hasil review manual:</strong> {w.leadOverrides[selected.id].reason}</> : <><strong>Sinyal:</strong> {original.level === 'Hot' ? 'Kebutuhan dan waktu pembelian dinyatakan.' : original.level === 'Warm' ? 'Sedang mengeksplorasi fitur dan kebutuhan.' : 'Informasi kebutuhan belum cukup spesifik.'}</>}</Notice><p className="muted small">{source === 'wa' ? 'Nama dari profil WhatsApp; bukan identitas terverifikasi.' : 'Mengisi form tidak otomatis berarti hot.'}<br/>Sinyal terakhir: {selected.date}</p><Button icon={Pencil} onClick={() => setClassify({ level: selected.level, reason: '' })}>Tinjau klasifikasi</Button><Button variant="secondary" onClick={() => setHistoryOpen(true)}>Lihat bukti & catatan</Button></div> : <EmptyState title="Pilih lead untuk melihat bukti" description="Sinyal chat atau form akan muncul di sini."/>}</Panel></div><Notice>Cold: sinyal kebutuhan minim · Warm: eksplorasi kebutuhan · Hot: niat beli eksplisit. Klasifikasi ini adalah aturan demo, bukan hasil AI sungguhan.</Notice>
-    <Modal open={!!classify} onClose={() => setClassify(null)} title={`Tinjau klasifikasi ${selected?.name || ''}`} footer={<Button onClick={saveClassification}>Simpan peninjauan</Button>}>{classify && <div className="stack"><Field label="Level audiens"><Select value={classify.level} onChange={e => setClassify(v => ({ ...v, level: e.target.value }))}>{['Cold', 'Warm', 'Hot'].map(l => <option key={l}>{l}</option>)}</Select></Field><Field label="Alasan peninjauan"><textarea className="input" rows="4" value={classify.reason} onChange={e => setClassify(v => ({ ...v, reason: e.target.value }))} placeholder="Jelaskan sinyal yang mendukung perubahan ini…"/></Field><Notice>Perubahan level tidak otomatis mengubah tahap funnel atau menjalankan follow-up.</Notice></div>}</Modal>
-    <Modal open={historyOpen && !!selected} onClose={() => setHistoryOpen(false)} title={`Bukti & catatan — ${selected?.name || ''}`} drawer>{selected && <div className="stack"><Badge color={levelColor(selected.level)}>{selected.level}</Badge><dl><dt>Sumber pertama</dt><dd>{selected.source === 'wa' ? 'WhatsApp' : 'Form LP'}</dd><dt>Sinyal</dt><dd>{selected.signal}</dd><dt>Nomor demo</dt><dd>{mask(selected.phone)}</dd><dt>Campaign</dt><dd>{campaignName(selected.campaign)}</dd></dl>{selected.linked && <Notice>Identitas ini memiliki touchpoint LP dan WA. Tetap satu kontak pada perhitungan primary origin.</Notice>}<h3>Catatan lokal</h3>{(w.leadNotes[selected.id] || []).map((n, i) => <div className="note-item" key={i}><p>{n.text}</p><small>{new Date(n.created).toLocaleString('id-ID')}</small></div>)}<textarea className="input" rows="3" value={note} onChange={e => setNote(e.target.value)} placeholder="Tambahkan catatan review…"/><Button icon={Plus} onClick={() => { if (!note.trim()) { toast('Tulis catatan terlebih dahulu.', 'error'); return; } patch('leadNotes', p => ({ ...p, [selected.id]: [...(p[selected.id] || []), { text: note, created: new Date().toISOString() }] })); setNote(''); toast('Catatan disimpan lokal.'); }}>Simpan catatan</Button></div>}</Modal>
-  </div>;
+  const { workspace } = useWorkspace();
+  const { campaign, period } = workspace.preferences;
+  const [leads, setLeads] = useState([]);
+  const [search, setSearch] = useState('');
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+    const days = ['7', '14', '30'].includes(String(period)) ? String(period) : '30';
+    const qs = new URLSearchParams({
+      days,
+      ...(campaign && campaign !== 'all' ? { campaignId: campaign } : {}),
+      ...(search ? { search } : {}),
+    });
+    apiRequest(`/api/leads?${qs.toString()}`)
+      .then(res => { if (!cancelled) setLeads(res?.items || res?.leads || []); })
+      .catch(() => { if (!cancelled) setLeads([]); })
+      .finally(() => { if (!cancelled) setLoading(false); });
+    return () => { cancelled = true; };
+  }, [campaign, period, search]);
+
+  return (
+    <div className="stack">
+      <PageHead
+        eyebrow="AUDIENCE INTELLIGENCE"
+        title="Daftar lead & klasifikasi AI."
+        description="Prospek dari WhatsApp dan landing page yang diklasifikasikan otomatis."
+      />
+
+      <Panel>
+        <SectionHead
+          title="Daftar Lead"
+          caption={`${leads.length} lead tercatat`}
+          action={<SearchInput value={search} onChange={setSearch} placeholder="Cari lead…"/>}
+        />
+
+        {loading ? (
+          <p className="muted">Memuat data lead…</p>
+        ) : !leads.length ? (
+          <EmptyState
+            icon={Users}
+            title="Belum ada lead masuk"
+            description="Hubungkan WhatsApp OpenWA atau Landing Page Tracker agar lead mulai masuk dan diklasifikasikan oleh AI."
+            action={<Link className="btn btn-primary" to="/app/integrations">Atur Integrasi</Link>}
+          />
+        ) : (
+          <div className="table-scroll">
+            <table>
+              <thead>
+                <tr>
+                  <th>Kontak / ID</th>
+                  <th>Temperatur</th>
+                  <th>Sumber</th>
+                  <th>Ringkasan Sinyal</th>
+                  <th>Terakhir Aktif</th>
+                </tr>
+              </thead>
+              <tbody>
+                {leads.map(l => (
+                  <tr key={l.id}>
+                    <td><strong>{l.name || l.phoneMasked || l.maskedPhone || l.id}</strong></td>
+                    <td>
+                      <Badge color={l.temperature === 'HOT' ? 'amber' : l.temperature === 'WARM' ? 'teal' : 'blue'}>
+                        {l.temperature || l.level || 'COLD'}
+                      </Badge>
+                    </td>
+                    <td>{l.channel || l.source || 'whatsapp'}</td>
+                    <td className="muted">{l.summary || l.topic || l.responseType || l.signal || '-'}</td>
+                    <td className="small muted">{l.createdAt ? new Date(l.createdAt).toLocaleString('id-ID') : '-'}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </Panel>
+    </div>
+  );
 }

@@ -3,11 +3,11 @@ export const money = (n = 0) => new Intl.NumberFormat('id-ID', { style: 'currenc
 export const number = (n = 0) => new Intl.NumberFormat('id-ID', { maximumFractionDigits: 1 }).format(n);
 export const percent = (n = 0) => `${number(n * 100)}%`;
 export const shortMoney = n => n >= 1000000 ? `Rp${number(n / 1000000)} jt` : money(n);
+export const shortMoneyMinor = n => shortMoney((Number(n) || 0) / 100);
 export const uid = () => globalThis.crypto?.randomUUID?.() || `local-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 export const STEPS = ['Profil bisnis', 'Branding & posisi', 'Campaign pertama', 'Strategi & creative', 'Koneksi Meta', 'Review & kirim'];
-export const SAMPLE = { name: 'Toko Nusa', category: 'Peralatan rumah tangga', product: 'Sikat elektrik mini', price: 149000, benefits: '3 kepala sikat; isi ulang USB', audience: 'Penghuni kos & rumah kecil', area: 'Bandung dan sekitarnya', photo: '', variants: [] };
 export function createWorkspace() {
-  return { version: 1, business: { name: '', category: '', product: '', price: '', benefits: '', audience: '', area: '', photo: '', variants: [] }, brand: { mode: 'ai', name: '', tagline: '', positioning: '', tone: 'Ramah, lugas, praktis', colors: ['#2874ff', '#10b7af'], preference: 'Praktis, ramah', emphasis: '', options: [], selectedId: null, round: 0, logo: '' }, campaign: { name: '', objective: 'Leads', goal: 'Dapatkan lead', destination: 'wa', phone: '', location: '', ageMin: 18, ageMax: 55, budget: 700000, start: '2026-10-24', end: '2026-10-30', lpMode: 'template', lpUrl: '', lpHeadline: '', lpFields: ['Nama', 'Nomor HP', 'Kebutuhan'], creative: '' }, meta: { connected: false, campaignWrite: false, account: 'Toko Nusa Ads', page: '', whatsapp: '' }, onboarding: { maxStep: 1, completed: false, brandView: 'input' }, execution: { status: 'draft', progress: 0, receiptId: null, scenario: 'success', approvedSnapshot: null }, receipts: [], preferences: { period: 'sep', campaign: 'all' }, leadOverrides: {}, leadNotes: {}, insightOverrides: {}, creativeDrafts: [], controlOverrides: {}, strategy: { proposed: { prospecting: 10000000, retargeting: 10000000, wa: 4000000 }, history: [] }, integrationDemo: { wa: false, lp: false } };
+  return { version: 1, business: { name: '', category: '', product: '', price: '', benefits: '', audience: '', area: '', photo: '', variants: [] }, brand: { mode: 'manual', name: '', tagline: '', positioning: '', tone: 'Ramah, lugas, praktis', colors: ['#2874ff', '#10b7af'], preference: '', emphasis: '', options: [], selectedId: null, round: 0, logo: '' }, campaign: { name: '', objective: 'Leads', goal: 'Dapatkan lead', destination: 'wa', phone: '', location: '', ageMin: 18, ageMax: 55, budget: '', start: '', end: '', lpMode: 'existing', lpUrl: '', lpHeadline: '', lpFields: ['Nama', 'Nomor HP', 'Kebutuhan'], creative: '' }, meta: { connected: false, campaignWrite: false, account: '', page: '', whatsapp: '' }, onboarding: { maxStep: 1, completed: false, brandView: 'input' }, execution: { status: 'draft', progress: 0, receiptId: null, scenario: '', approvedSnapshot: null }, receipts: [], preferences: { period: '30', campaign: 'all' }, leadOverrides: {}, leadNotes: {}, insightOverrides: {}, creativeDrafts: [], controlOverrides: {}, strategy: { proposed: {}, history: [] }, integrationDemo: { wa: false, lp: false } };
 }
 export function mergeWorkspace(input) {
   if (!input || input.version !== 1 || typeof input.business !== 'object' || !input.business) throw new Error('Format workspace tidak dikenali. Gunakan file ekspor FunnelLens.');
@@ -39,7 +39,7 @@ export function mergeWorkspace(input) {
   for (const item of out.business.variants) { if (!item || typeof item.name !== 'string' || !(Number(item.price) > 0)) throw Error('Varian produk pada file tidak valid.'); }
   for (const item of out.receipts) { if (!item || typeof item.id !== 'string' || typeof item.name !== 'string') throw Error('Riwayat campaign pada file tidak valid.'); }
   for (const item of out.creativeDrafts) { if (!item || typeof item.id !== 'string' || typeof item.name !== 'string' || typeof item.angle !== 'string') throw Error('Draft creative pada file tidak valid.'); }
-  if (!['sep', 'aug', 'jul'].includes(out.preferences.period)) out.preferences.period = 'sep';
+  if (!['7', '14', '30'].includes(String(out.preferences.period))) out.preferences.period = '30';
   if (!['all', 'prospecting', 'retargeting', 'wa'].includes(out.preferences.campaign)) out.preferences.campaign = 'all';
   if (!['wa', 'lp', 'both'].includes(out.campaign.destination)) throw Error('Destinasi campaign tidak valid.');
   out.strategy.proposed = { ...base.strategy.proposed, ...out.strategy.proposed };
@@ -66,29 +66,15 @@ export function validateStep(step, w) {
   if (step === 3) {
     if (!c.name.trim()) e.campaignName = 'Isi nama campaign.';
     if (!c.location.trim()) e.location = 'Tentukan wilayah audiens.';
-    if (!(Number(c.budget) >= 10000)) e.budget = 'Budget demo minimal Rp10.000.';
+    if (!(Number(c.budget) >= 10000)) e.budget = 'Budget minimal Rp10.000.';
     if (daysBetween(c.start, c.end) < 1) e.schedule = 'Tanggal akhir tidak boleh sebelum tanggal mulai.';
     if (!Number.isFinite(Number(c.ageMin)) || !Number.isFinite(Number(c.ageMax)) || Number(c.ageMin) < 18 || Number(c.ageMax) > 65 || Number(c.ageMin) > Number(c.ageMax)) e.age = 'Gunakan rentang usia 18–65 yang valid.';
-    if (c.destination !== 'lp' && !/^\+?[\d\s-]{9,18}$/.test(c.phone)) e.phone = 'Masukkan nomor bisnis yang valid, misalnya 081234567890.';
-    if (c.destination !== 'wa' && c.lpMode === 'existing') { try { const u = new URL(c.lpUrl); if (u.protocol !== 'https:') throw Error(); } catch { e.lpUrl = 'Gunakan URL HTTPS yang sudah live.'; } }
-    if (c.destination !== 'wa' && c.lpMode === 'template' && !c.lpHeadline.trim()) e.lpHeadline = 'Isi headline LP demo.';
+    if (c.destination !== 'lp' && !/^\+?[\d\s-]{9,18}$/.test(c.phone)) e.phone = 'Masukkan nomor bisnis yang valid.';
+    if (c.destination !== 'wa') { try { const u = new URL(c.lpUrl); if (u.protocol !== 'https:') throw Error(); } catch { e.lpUrl = 'Masukkan URL landing page HTTPS yang valid.'; } }
   }
   if (step === 4 && !c.creative.trim()) e.creative = 'Isi teks iklan sebelum melanjutkan.';
-  if (step === 5) { if (!w.meta.connected) e.meta = 'Hubungkan akun Meta terlebih dahulu.'; else if (!w.meta.campaignWrite) e.meta = 'Akun OAuth belum memberikan izin ads_management.'; else if (!w.meta.account.trim() || !w.meta.page.trim() || (c.destination !== 'lp' && !w.meta.whatsapp.trim())) e.meta = 'Pilih akun iklan, halaman, dan nomor WhatsApp Business yang sudah diverifikasi.'; }
+  if (step === 5) { if (!w.meta.connected) e.meta = 'Hubungkan akun Meta terlebih dahulu.'; else if (!w.meta.account.trim()) e.meta = 'Pilih Ad Account Meta terlebih dahulu.'; }
   return e;
-}
-export function draftFingerprint(w) { return JSON.stringify({ business: w.business, brand: w.brand, campaign: w.campaign, meta: w.meta }); }
-export function canSubmit(w, consent) { return !!consent && [1, 2, 3, 4, 5].every(s => Object.keys(validateStep(s, w)).length === 0) && w.execution.status !== 'sending'; }
-export function generateBrands(business, round = 0) {
-  const raw = (business.name || 'Nusa').replace(/^(toko|cv|pt|kedai)\s+/i, '').trim().split(' ')[0] || 'Nusa';
-  const product = business.product || 'produk Anda';
-  const sets = [['Bersih', 'Rapi', 'Praktis'], ['Harian', 'Ringkas', 'Nyaman'], ['Pilih', 'Ruang', 'Mudah']];
-  const suffix = sets[round % sets.length];
-  return [
-    { id: `${round}-0`, name: `${raw}${suffix[0]}`, tagline: round ? 'Praktis untuk setiap hari' : 'Beres tanpa ribet', positioning: `${product} praktis untuk ${business.audience || 'kebutuhan sehari-hari'}`, tone: 'Ramah, lugas, praktis', colors: ['#2874ff', '#10b7af'] },
-    { id: `${round}-1`, name: `${raw}${suffix[1]}`, tagline: 'Rutinitas ringan, ruang lebih nyaman', positioning: `${product} dengan pendekatan sederhana untuk ${business.audience || 'pelanggan Anda'}`, tone: 'Tenang, ringkas, hangat', colors: ['#ead9c8', '#11274b'] },
-    { id: `${round}-2`, name: `${raw}${suffix[2]}`, tagline: 'Pilihan untuk kebutuhan harian', positioning: `Pilihan ${product.toLowerCase()} untuk kebutuhan ${business.audience || 'harian'}`, tone: 'Akrab, langsung, optimistis', colors: ['#9fb7a6', '#152b46'] }
-  ];
 }
 export function csv(rows) { return '\uFEFF' + rows.map(row => row.map(v => `"${String(v ?? '').replaceAll('"', '""')}"`).join(',')).join('\r\n'); }
 export function download(name, content, type = 'application/json') {

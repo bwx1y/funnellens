@@ -54,6 +54,8 @@ cp .env.example .env
 | `MAIL_FROM` | `noreply@localhost` | Alamat pengirim email |
 | `REDIS_HOST` / `REDIS_PORT` / `REDIS_DB` | `localhost` / `6379` / `0` | Koneksi Redis (BullMQ) |
 | `REDIS_PASSWORD` | kosong | Password Redis (opsional) |
+| `CORS` | `localhost,127.0.0.1` | Host atau origin FE yang diizinkan mengakses API; pisahkan dengan koma |
+| `FRONTEND_URL` | `http://127.0.0.1:5173` | URL FE untuk tujuan redirect setelah OAuth Meta berhasil |
 | `OPEN_WA_URL` | `localhost` | Base URL OpenWA gateway |
 | `OPEN_WA_APP_KEY` | - | API key OpenWA |
 | `OPEN_WA_WEBHOOK_URL` | `http://host.docker.internal:3000/api/wa/webhook` | URL webhook yang didaftarkan ke OpenWA; harus terjangkau dari container gateway, bukan dari host |

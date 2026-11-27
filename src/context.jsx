@@ -1,4 +1,4 @@
-import React, { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react';
+import React, { createContext, useCallback, useContext, useEffect, useState } from 'react';
 import { createWorkspace, mergeWorkspace, STORAGE_KEY } from './lib/domain.js';
 import { apiRequest } from './lib/supabase.js';
 import { useAuth } from './auth.jsx';
@@ -16,7 +16,6 @@ export function WorkspaceProvider({ children }) {
   const [workspace, setWorkspace] = useState(loadLocal);
   const [storageError, setStorageError] = useState('');
   const [workspaceReady, setWorkspaceReady] = useState(false);
-  const syncToken = useRef(0);
   const authenticated = Boolean(session?.access_token && !session?.isDemo);
 
   useEffect(() => {
@@ -24,23 +23,24 @@ export function WorkspaceProvider({ children }) {
     let cancelled = false;
     const load = async () => {
       setWorkspaceReady(false); setStorageError('');
-      if (!authenticated) {
-        setWorkspace(loadLocal()); setWorkspaceReady(true); return;
-      }
-      setWorkspace(createWorkspace());
+      setWorkspace(loadLocal());
       try {
-        const result = await apiRequest('/api/settings/workspace');
+        if (!authenticated) return;
+        const result = await apiRequest('/api/settings');
         if (cancelled) return;
-        if (result?.workspace) setWorkspace(mergeWorkspace(result.workspace));
-        else {
-          const local = loadLocal();
-          setWorkspace(local);
+        const remote = result?.workspace;
+        if (remote) {
+          setWorkspace(current => ({
+            ...current,
+            business: {
+              ...current.business,
+              name: current.business.name || remote.name || '',
+              area: current.business.area || remote.address || '',
+            },
+          }));
         }
       } catch (error) {
-        if (!cancelled) {
-          setWorkspace(loadLocal());
-          setStorageError(`Mode lokal aktif (Backend API: ${error.message})`);
-        }
+        if (!cancelled) setStorageError(`Workspace backend tidak dapat dimuat: ${error.message}`);
       } finally { if (!cancelled) setWorkspaceReady(true); }
     };
     load();
@@ -55,39 +55,27 @@ export function WorkspaceProvider({ children }) {
 
   useEffect(() => {
     if (!authReady || !workspaceReady) return;
-    if (!authenticated) {
-      try { browserStorage().setItem(STORAGE_KEY, JSON.stringify(workspace)); setStorageError(''); }
-      catch { setStorageError('Penyimpanan browser penuh atau diblokir.'); }
-      return;
-    }
-    if (!workspace.business.name.trim()) return;
-    const token = ++syncToken.current;
-    const timer = setTimeout(async () => {
-      try { await apiRequest('/api/settings/workspace', { method: 'PUT', body: JSON.stringify(workspace) }); if (token === syncToken.current) setStorageError(''); }
-      catch (error) { if (token === syncToken.current) setStorageError(`Gagal sinkronisasi ke Backend API: ${error.message}`); }
-    }, 450);
-    return () => clearTimeout(timer);
-  }, [workspace, authReady, workspaceReady, authenticated]);
+    try { browserStorage().setItem(STORAGE_KEY, JSON.stringify(workspace)); setStorageError(''); }
+    catch { setStorageError('Penyimpanan browser penuh atau diblokir.'); }
+  }, [workspace, authReady, workspaceReady]);
 
   useEffect(() => {
     const handle = (event) => {
-      if (authenticated || event.key !== STORAGE_KEY || !event.newValue) return;
+      if (event.key !== STORAGE_KEY || !event.newValue) return;
       try { setWorkspace(mergeWorkspace(JSON.parse(event.newValue))); } catch { setStorageError('Perubahan dari tab lain tidak dapat dibaca.'); }
     };
     window.addEventListener('storage', handle); return () => window.removeEventListener('storage', handle);
   }, [authenticated]);
 
   const reset = useCallback(async () => {
-    if (authenticated) {
-      await apiRequest('/api/workspace', { method: 'DELETE' });
-    } else browserStorage().removeItem(STORAGE_KEY);
+    browserStorage().removeItem(STORAGE_KEY);
     setWorkspace(createWorkspace()); setStorageError('');
-  }, [authenticated]);
+  }, []);
   const importWorkspace = useCallback((value) => {
     const next = mergeWorkspace(value);
-    if (!authenticated) browserStorage().setItem(STORAGE_KEY, JSON.stringify(next));
+    browserStorage().setItem(STORAGE_KEY, JSON.stringify(next));
     setWorkspace(next); setStorageError('');
-  }, [authenticated]);
+  }, []);
   return <Context.Provider value={{ workspace, patch, setWorkspace, storageError, reset, importWorkspace, workspaceReady, connected: authenticated }}>{children}</Context.Provider>;
 }
 export const useWorkspace = () => useContext(Context);

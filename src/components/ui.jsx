@@ -1,9 +1,8 @@
 import React, { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { Link } from 'react-router-dom';
-import { ArrowRight, CalendarDays, Check, CheckCircle2, ChevronDown, ChevronLeft, ChevronRight, Download, Info, Layers, LoaderCircle, Search, X, AlertTriangle, Inbox } from 'lucide-react';
-import { useWorkspace } from '../context.jsx';
-import { CAMPAIGNS, PERIODS } from '../lib/data.js';
+import { Link, useLocation } from 'react-router-dom';
+import { ArrowRight, Check, CheckCircle2, ChevronDown, ChevronLeft, ChevronRight, Download, Info, LoaderCircle, Search, X, AlertTriangle, Inbox } from 'lucide-react';
+import { APP_PAGE_GROUPS } from '../lib/navigation.js';
 
 export function Logo({ compact = false }) {
   return (
@@ -22,40 +21,35 @@ export function Badge({ children, color = 'blue', dot = false }) { return <span 
 export function DemoBadge() { return <span className="demo-badge"><i/>DATA DEMO</span>; }
 export function Panel({ children, className = '', ...props }) { return <section className={`panel ${className}`} {...props}>{children}</section>; }
 export function SectionHead({ title, caption, action, icon: Icon }) { return <div className="section-head"><div><h2>{Icon && <Icon size={20}/>} {title}</h2>{caption && <p className="muted small">{caption}</p>}</div>{action}</div>; }
-export function PageHead({ eyebrow, title, description, action, filters = true }) {
-  const { workspace, patch } = useWorkspace();
-  const { campaign, period } = workspace.preferences;
+export function PageHead({ eyebrow, title, description, action }) {
+  const location = useLocation();
+  const activeGroup = APP_PAGE_GROUPS.find(group => group.items.some(item => location.pathname === `/app/${item.path}`));
   return (
-    <div className="page-head">
-      <div className="page-head-copy">
-        {eyebrow && <span className="eyebrow">{eyebrow}</span>}
-        <h1>{title}</h1>
-        {description && <p>{description}</p>}
+    <div className="page-head-block">
+      <div className="page-head">
+        <div className="page-head-copy">
+          {eyebrow && <span className="eyebrow">{eyebrow}</span>}
+          <h1>{title}</h1>
+          {description && <p>{description}</p>}
+        </div>
+        <div className="page-head-tools">
+          {action && <div className="page-head-action">{action}</div>}
+        </div>
       </div>
-      <div className="page-head-tools">
-        {filters && (
-          <div className="global-filters">
-            <label className="head-filter">
-              <Layers size={16}/>
-              <span className="sr">Campaign</span>
-              <select aria-label="Campaign" value={campaign} onChange={e => patch('preferences', { campaign: e.target.value })}>
-                <option value="all">Semua campaign</option>
-                {CAMPAIGNS.map(item => <option value={item.id} key={item.id}>{item.name}</option>)}
-              </select>
-              <ChevronDown size={14}/>
-            </label>
-            <label className="head-filter">
-              <CalendarDays size={16}/>
-              <span className="sr">Periode</span>
-              <select aria-label="Periode" value={period} onChange={e => patch('preferences', { period: e.target.value })}>
-                {Object.entries(PERIODS).map(([id, item]) => <option value={id} key={id}>{item.label}</option>)}
-              </select>
-              <ChevronDown size={14}/>
-            </label>
-          </div>
-        )}
-        {action && <div className="page-head-action">{action}</div>}
-      </div>
+      {activeGroup && (
+        <nav className="page-tabs" aria-label={`${activeGroup.label} subhalaman`}>
+          {activeGroup.items.map(item => (
+            <Link
+              key={item.path}
+              to={`/app/${item.path}`}
+              className={location.pathname === `/app/${item.path}` ? 'active' : ''}
+              aria-current={location.pathname === `/app/${item.path}` ? 'page' : undefined}
+            >
+              {item.label}
+            </Link>
+          ))}
+        </nav>
+      )}
     </div>
   );
 }
@@ -66,7 +60,7 @@ export function Input(props) { return <input className="input" {...props}/>; }
 export function Select({ children, ...props }) { return <span className="select-wrap"><select className="input" {...props}>{children}</select><ChevronDown size={15}/></span>; }
 export function Tabs({ options, value, onChange, label = 'Pilihan tampilan' }) { return <div className="tabs" role="tablist" aria-label={label}>{options.map(o => <button key={o.value} type="button" role="tab" aria-selected={o.value === value} className={o.value === value ? 'active' : ''} onClick={() => onChange(o.value)}>{o.icon && <o.icon size={17}/>} {o.label}{o.count !== undefined && <span>{o.count}</span>}</button>)}</div>; }
 export function SearchInput({ value, onChange, placeholder = 'Cari…', ...props }) { return <div className="search-input"><Search size={17}/><input value={value} onChange={e => onChange(e.target.value)} placeholder={placeholder} {...props}/>{value && <button title="Hapus pencarian" type="button" onClick={() => onChange('')}><X size={14}/></button>}</div>; }
-export function EmptyState({ title = 'Belum ada data pada pilihan ini', description = 'Ubah filter atau mulai dengan dataset contoh.', action, icon: Icon = Inbox }) { return <div className="empty-state"><span><Icon size={28}/></span><h3>{title}</h3><p>{description}</p>{action}</div>; }
+export function EmptyState({ title = 'Belum ada data pada pilihan ini', description = 'Ubah pilihan atau hubungkan sumber data untuk mulai melihat hasil.', action, icon: Icon = Inbox }) { return <div className="empty-state"><span><Icon size={28}/></span><h3>{title}</h3><p>{description}</p>{action}</div>; }
 export function Pagination({ page, pages, onChange, total, size }) { return <div className="pagination"><span>{total ? `${(page - 1) * size + 1}–${Math.min(page * size, total)} dari ${total}` : '0 hasil'}</span><div><button aria-label="Halaman sebelumnya" disabled={page <= 1} onClick={() => onChange(page - 1)}><ChevronLeft size={17}/></button>{Array.from({ length: Math.min(pages, 5) }, (_, i) => Math.min(Math.max(1, page - 2), Math.max(1, pages - 4)) + i).map(p => <button key={p} className={p === page ? 'active' : ''} onClick={() => onChange(p)}>{p}</button>)}<button aria-label="Halaman berikutnya" disabled={page >= pages} onClick={() => onChange(page + 1)}><ChevronRight size={17}/></button></div></div>; }
 export function ProgressBar({ value, color = 'blue', label, detail }) { return <div className="progress-row">{label && <span>{label}</span>}<div className="progress-track"><i className={`bg-${color}`} style={{ width: `${Math.max(0, Math.min(100, value))}%` }}/></div>{detail && <strong>{detail}</strong>}</div>; }
 export function ProductImage({ source, className = '', alt = 'Sikat elektrik mini, contoh produk' }) { return <img className={`product-image ${className}`} src={source || '/product.png'} alt={alt} onError={e => { if (!e.currentTarget.src.endsWith('/product.png')) e.currentTarget.src = '/product.png'; }}/>; }

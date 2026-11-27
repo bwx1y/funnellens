@@ -1,23 +1,107 @@
-import React, { useState } from 'react';
-import { useSearchParams } from 'react-router-dom';
-import { ArrowRight, CheckCircle2, Clock3, Download, FileCheck2, Sparkles } from 'lucide-react';
-import { useWorkspace } from '../context.jsx';
-import { Badge, Button, EmptyState, Field, Input, Modal, Notice, PageHead, Panel, SearchInput, Select, TextLink, useToast } from '../components/ui.jsx';
-import { INSIGHTS } from '../lib/data.js';
-import { download } from '../lib/domain.js';
-const statuses = { new: 'New', reviewing: 'Reviewing', resolved: 'Resolved', dismissed: 'Dismissed' };
+import React, { useEffect, useState } from 'react';
+import { Link } from 'react-router-dom';
+import { Sparkles } from 'lucide-react';
+import { Badge, Button, EmptyState, PageHead, Panel, SectionHead, useToast } from '../components/ui.jsx';
+import { apiRequest } from '../lib/supabase.js';
+
 export default function Insights() {
-  const { workspace: w, patch } = useWorkspace(), toast = useToast(), [params, setParams] = useSearchParams();
-  const [query, setQuery] = useState(''), [filter, setFilter] = useState('all'), [triage, setTriage] = useState(null);
-  const all = INSIGHTS.map(i => ({ ...i, ...(w.insightOverrides[i.id] || {}) }));
-  const rows = all.filter(i => (filter === 'all' || filter === i.status) && `${i.title} ${i.domain}`.toLowerCase().includes(query.toLowerCase()));
-  const selected = rows.find(i => i.id === params.get('select')) || rows[0];
-  const exportEvidence = () => { if (!selected) return; download(`funnellens-insight-${selected.id}.json`, JSON.stringify({ ...selected, period: '1–30 September 2026', isDemo: true, sources: ['Meta', 'Internal LP', 'WhatsApp', 'Sales'], note: 'Temuan sintetis; tidak berasal dari agent atau API nyata.' }, null, 2)); toast('Evidence insight diekspor.'); };
-  const save = () => {
-    if (['resolved', 'dismissed'].includes(triage.status) && !triage.reason.trim()) { toast('Isi alasan resolved atau dismissed.', 'error'); return; }
-    patch('insightOverrides', p => ({ ...p, [selected.id]: { status: triage.status, reason: triage.reason, updated: new Date().toISOString(), history: [...(p[selected.id]?.history || []), { status: triage.status, reason: triage.reason, date: new Date().toISOString() }] } })); setTriage(null); toast('Status review disimpan lokal.');
+  const [insights, setInsights] = useState([]);
+  const [alerts, setAlerts] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const toast = useToast();
+
+  const load = async () => {
+    setLoading(true);
+    try {
+      const [ins, al] = await Promise.all([
+        apiRequest('/api/insights?tab=active'),
+        apiRequest('/api/alerts?status=active'),
+      ]);
+      setInsights(ins?.insights || ins?.items || []);
+      setAlerts(al?.alerts || al?.items || []);
+    } catch (error) {
+      setInsights([]);
+      setAlerts([]);
+      toast(error.message, 'error');
+    } finally {
+      setLoading(false);
+    }
   };
-  return <div className="stack"><PageHead eyebrow="EVIDENCE NEWSROOM" filters={false} title="Temuan untuk ditinjau, dengan buktinya." description="Prioritas: risiko keputusan → cakupan bukti → urgensi. Pisahkan observasi dari hipotesis." action={<Button variant="secondary" icon={Download} onClick={exportEvidence} disabled={!selected}>Ekspor bukti</Button>}/><div className="context-row"><Badge color="gray">Temuan lintas workspace</Badge><span className="muted small">Dataset September · ringkasan sintetis, bukan hasil AI sungguhan</span><span className="push-right"><strong>{all.filter(i => !['resolved', 'dismissed'].includes(i.status)).length}</strong> menunggu review</span></div><div className="grid grid-insights"><Panel className="insight-feed"><div className="stack"><SearchInput value={query} onChange={setQuery} placeholder="Cari temuan…"/><Select aria-label="Filter status insight" value={filter} onChange={e => setFilter(e.target.value)}><option value="all">Semua status</option>{Object.entries(statuses).map(([key, label]) => <option key={key} value={key}>{label}</option>)}</Select></div><div className="insight-feed-list">{rows.map((i, idx) => <button key={i.id} className={selected?.id === i.id ? 'selected' : ''} onClick={() => setParams({ select: i.id })}><div className="flex between"><span className="insight-number">0{idx + 1}</span><Badge color={i.type === 'Data parsial' ? 'amber' : i.type === 'Teramati' ? 'teal' : 'purple'}>{i.type}</Badge><Badge color="gray">{statuses[i.status]}</Badge></div><h3>{i.title}</h3><p>{i.finding}</p><small>{i.domain} · {i.priority}</small></button>)}</div>{!rows.length && <EmptyState title="Tidak ada temuan pada filter ini" description="Pilih status lain atau hapus pencarian."/>}</Panel><Panel className="evidence-pane">{selected ? <div className="stack"><div className="flex between wrap"><Badge color="teal">Temuan teramati</Badge><Badge color="gray">{selected.domain}</Badge></div><h2 className="evidence-title">{selected.finding}</h2>{selected.id === 'attribution' ? <><div className="composition tall"><i className="bg-blue" style={{ width: '75%' }}/><i className="bg-gray" style={{ width: '25%' }}/></div><div className="flex between"><span><strong>180</strong> tertaut · 75%</span><span><strong>60</strong> belum tertaut · 25%</span></div></> : selected.id === 'distribution' ? <div className="evidence-numbers"><div><strong>5.000</strong><span>TOFU · 50%</span></div><div><strong>2.800</strong><span>MOFU · 28%</span></div><div><strong>2.020</strong><span>BOFU · 20,2%</span></div><div><strong>180</strong><span>Action · 1,8%</span></div></div> : <div className="compare-costs"><div><span>Demo A · Retargeting / Warm</span><strong>Rp20.000/QL</strong><small>200 QL · Rp4 jt spend</small></div><div><span>Social B · Retargeting / Warm</span><strong>Rp33.333/QL</strong><small>120 QL · Rp4 jt spend</small></div></div>}<dl className="evidence-meta"><dt>Sumber</dt><dd>Meta + LP internal + WhatsApp + Sales (demo)</dd><dt>Periode</dt><dd>1–30 Sep 2026</dd><dt>Aturan</dt><dd>{selected.id === 'distribution' ? 'Snapshot tahap tertinggi · profil terdeduplikasi' : 'Klik 7 hari · identitas dan transaksi dideduplikasi'}</dd><dt>Cakupan</dt><dd>{selected.id === 'attribution' ? '75% transaksi tertaut' : selected.id === 'distribution' ? '10.000 dari 12.000 profil cocok' : 'Perbandingan pada campaign dan segmen yang sama'}</dd></dl><Notice tone="amber"><strong>Hipotesis</strong><p>{selected.hypothesis}</p></Notice><Notice><strong>Dampak</strong><p>{selected.impact}</p></Notice><div className="recommendation-action"><div><strong>Rekomendasi</strong><p>{selected.recommendation}</p></div><TextLink to={selected.route}>Buka area terkait</TextLink></div><div className="triage-row"><div><span className="muted small">Status temuan</span><h3>{statuses[selected.status]}</h3>{selected.reason && <p className="muted small">{selected.reason}</p>}</div><Button variant="secondary" icon={FileCheck2} onClick={() => setTriage({ status: selected.status, reason: selected.reason || '' })}>Tinjau status</Button></div>{selected.history?.length > 0 && <details><summary>Riwayat triase ({selected.history.length})</summary>{selected.history.map((h, i) => <div className="history-item" key={i}><Clock3 size={15}/><div><strong>{statuses[h.status]}</strong><p>{h.reason || 'Ditandai untuk review.'}</p><small>{new Date(h.date).toLocaleString('id-ID')}</small></div></div>)}</details>}</div> : <EmptyState title="Pilih insight untuk melihat evidence"/>}</Panel></div>
-    <Modal open={!!triage} onClose={() => setTriage(null)} title="Review status insight" footer={<Button onClick={save}>Simpan status</Button>}>{triage && <div className="stack"><Field label="Status"><Select value={triage.status} onChange={e => setTriage(v => ({ ...v, status: e.target.value }))}>{Object.entries(statuses).map(([key, label]) => <option key={key} value={key}>{label}</option>)}</Select></Field><Field label="Alasan / catatan"><textarea className="input" rows="4" value={triage.reason} onChange={e => setTriage(v => ({ ...v, reason: e.target.value }))} placeholder="Alasan diperlukan saat resolved atau dismissed."/></Field><Notice>Resolved menandai proses review selesai, bukan bukti bahwa metrik bisnis sudah berubah.</Notice></div>}</Modal>
-  </div>;
+
+  useEffect(() => { load(); }, []);
+
+  const markReviewed = async (item) => {
+    try {
+      await apiRequest(`/api/insights/${encodeURIComponent(item.key)}/review`, {
+        method: 'PATCH',
+        headers: { 'idempotency-key': crypto.randomUUID() },
+        body: JSON.stringify({ status: 'read' }),
+      });
+      toast('Insight ditandai sudah dibaca.');
+      load();
+    } catch (error) {
+      toast(error.message, 'error');
+    }
+  };
+
+  return (
+    <div className="stack">
+      <PageHead
+        eyebrow="AI INSIGHT CENTER"
+        title="Temuan & peringatan otomatis."
+        description="Rekomendasi berbasis data asli dari Meta Ads, Pixel, dan percakapan WhatsApp."
+      />
+
+      {loading ? (
+        <Panel><p className="muted">Memuat insight &amp; peringatan…</p></Panel>
+      ) : !insights.length && !alerts.length ? (
+        <Panel>
+          <EmptyState
+            icon={Sparkles}
+            title="Belum ada insight atau peringatan"
+            description="Insight otomatis akan dibuat setelah Meta Ads dan WhatsApp terhubung dan tersinkronisasi."
+            action={<Link className="btn btn-primary" to="/app/integrations">Atur Integrasi</Link>}
+          />
+        </Panel>
+      ) : (
+        <div className="grid grid-2">
+          <Panel>
+            <SectionHead title="Insight AI" caption={`${insights.length} temuan`}/>
+            {insights.length ? (
+              <div className="stack">
+                {insights.map(item => (
+                  <div key={item.id} className="decision-row" style={{ flexDirection: 'column', alignItems: 'flex-start' }}>
+                    <div className="flex between" style={{ width: '100%' }}>
+                      <Badge color="blue">{item.category || 'Insight'}</Badge>
+                      <Badge color={item.review?.status === 'read' ? 'teal' : 'amber'}>{item.review?.status || item.status || 'ACTIVE'}</Badge>
+                    </div>
+                    <h3 style={{ marginTop: 8 }}>{item.title}</h3>
+                    <p className="small muted">{item.body || item.summary || item.finding || item.recommendation}</p>
+                    {item.review?.status !== 'read' && (
+                      <Button variant="secondary" onClick={() => markReviewed(item)}>Tandai sudah dibaca</Button>
+                    )}
+                  </div>
+                ))}
+              </div>
+            ) : <p className="muted">Belum ada insight.</p>}
+          </Panel>
+
+          <Panel>
+            <SectionHead title="Peringatan Aktif" caption={`${alerts.length} peringatan`}/>
+            {alerts.length ? (
+              <div className="stack">
+                {alerts.map(a => (
+                  <div key={a.id} className="decision-row" style={{ flexDirection: 'column', alignItems: 'flex-start' }}>
+                    <Badge color={a.level === 'CRITICAL' ? 'red' : 'amber'}>{a.level || a.severity || 'WARNING'}</Badge>
+                    <h3 style={{ marginTop: 8 }}>{a.title}</h3>
+                    <p className="small muted">{a.body || a.message || a.caption}</p>
+                  </div>
+                ))}
+              </div>
+            ) : <p className="muted">Tidak ada peringatan aktif.</p>}
+          </Panel>
+        </div>
+      )}
+    </div>
+  );
 }

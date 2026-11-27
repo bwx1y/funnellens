@@ -18,7 +18,32 @@ export class WaSessionService {
     private readonly setupSessionQueue = new QueueManager<{ code: string }>(WaSessionService.QUEUE_NAME)
 
     async findAll(tenantId: string) {
-        return this.waSessionRepository.findAllByTenantId(tenantId);
+        const sessions = await this.waSessionRepository.findAllByTenantId(tenantId);
+        return Promise.all(
+            sessions.map(async (session) => {
+                if (session.status !== "ready") {
+                    try {
+                        const remote = await this.openWa.sessions.get(session.id);
+                        if (remote.status === "ready" && session.status !== "ready") {
+                            await this.waSessionRepository.update(session.id, {
+                                status: "ready",
+                                phoneNumber: remote.phone ?? session.phoneNumber,
+                                phoneName: remote.pushName ?? session.phoneName,
+                            });
+                            return {
+                                ...session,
+                                status: "ready",
+                                phoneNumber: remote.phone ?? session.phoneNumber,
+                                phoneName: remote.pushName ?? session.phoneName,
+                            };
+                        }
+                    } catch {
+                        // ignore gateway sync error on list read
+                    }
+                }
+                return session;
+            })
+        );
     }
 
     async findOne(tenantId: string, id: string) {

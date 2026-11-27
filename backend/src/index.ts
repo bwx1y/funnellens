@@ -1,4 +1,5 @@
 import {Elysia} from "elysia";
+import {cors} from "@elysiajs/cors";
 import openapi from "@elysia/openapi";
 import {AppError, codeForStatus} from "@shared/errors";
 import {Config} from "@/config";
@@ -14,6 +15,15 @@ import {WaSessionService} from "@/modules/wa/session/service";
 import {AlertsQueue} from "@/modules/alerts/queue";
 import {RetentionQueue} from "@/modules/retention/queue";
 
+const corsOrigins = [
+    ...Config.application.cors.split(",").map((origin) => origin.trim()).filter(Boolean),
+    ...(Config.application.mode === "development" ? ["localhost", "127.0.0.1"] : []),
+].map((origin) => {
+    if (origin.includes("://")) return origin;
+    const escaped = origin.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    return new RegExp(`^https?:\\/\\/${escaped}(?::\\d+)?$`, "i");
+});
+
 // Dynamic discovery of worker files across feature modules
 const workerGlob = new Bun.Glob("./modules/**/worker.ts");
 for await (const file of workerGlob.scan({ cwd: import.meta.dir })) {
@@ -21,6 +31,11 @@ for await (const file of workerGlob.scan({ cwd: import.meta.dir })) {
 }
 
 export const app = new Elysia()
+    .use(cors({
+        origin: corsOrigins,
+        methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+        allowedHeaders: ["Content-Type", "Authorization", "Idempotency-Key"],
+    }))
     .use(httpLogger)
     // Order matters: the id runs first so every later log line and error carries it, the limiter runs
     // before the idempotency replay so a retry storm cannot bypass the budget.

@@ -15,6 +15,7 @@
   },
   "dependencies": {
     "@elysia/openapi": "^1.4.17",
+    "@elysiajs/cors": "^1.4.3",
     "@google/genai": "^3.3.0",
     "@rmyndharis/openwa": "^0.11.0",
     "@toon-format/toon": "^4.4.0",

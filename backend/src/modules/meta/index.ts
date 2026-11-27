@@ -6,6 +6,7 @@ import {MetaSyncQueue} from "@/modules/meta/queue";
 import {MetaSyncDlq} from "@/modules/meta/dlq";
 import {NotFoundError} from "@shared/errors";
 import {requireAdmin} from "@shared/guards";
+import {Config} from "@/config";
 
 const metaService = new MetaService();
 const metaSyncQueue = new MetaSyncQueue();
@@ -19,7 +20,14 @@ export const MetaOAuthController = new Elysia({
     }
 })
     .get("/callback",
-        async ({query}) => metaService.handleCallback(query),
+        async ({query}) => {
+            await metaService.handleCallback(query);
+            const destination = new URL("/app/integrations?meta=connected", Config.application.frontendUrl);
+            return new Response(null, {
+                status: 302,
+                headers: {location: destination.toString()},
+            });
+        },
         {
             query: MetaSchema.oauthCallback,
             detail: {

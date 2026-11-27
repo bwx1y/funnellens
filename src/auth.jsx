@@ -2,8 +2,6 @@ import React, { createContext, useContext, useEffect, useMemo, useState } from '
 import { apiRequest } from './lib/supabase.js';
 
 const LOCAL_SESSION_KEY = 'funnellens_session';
-export const DEFAULT_OWNER_EMAIL = 'owner@funnellens.com';
-export const DEFAULT_OWNER_ID = '87e15028-a56b-456f-bcb8-6571c33b5ce8';
 
 const AuthContext = createContext(null);
 
@@ -35,64 +33,46 @@ export function AuthProvider({ children }) {
           body: JSON.stringify({ email: cleanEmail, password }),
         });
         const token = res?.token || res?.data?.token;
-        if (token) {
-          const nextSession = {
-            access_token: token,
-            user: {
-              id: res.id || DEFAULT_OWNER_ID,
-              email: res.email || cleanEmail,
-              fullName: res.fullName || 'Owner FunnelLens',
-              role: res.role || 'ADMIN',
-              tenant: res.tenant || null,
-              user_metadata: { name: res.fullName || 'Owner FunnelLens' },
-            },
-          };
-          localStorage.setItem(LOCAL_SESSION_KEY, JSON.stringify(nextSession));
-          setSession(nextSession);
-          return { data: { session: nextSession }, error: null };
+        if (!token) {
+          return { data: null, error: { message: 'Token autentikasi tidak diterima dari server.' } };
         }
-        return { data: null, error: { message: 'Token autentikasi tidak ditemukan.' } };
+        const nextSession = {
+          access_token: token,
+          user: {
+            id: res.id,
+            email: res.email || cleanEmail,
+            fullName: res.fullName || cleanEmail,
+            role: res.role || 'ADMIN',
+            tenant: res.tenant || null,
+            user_metadata: { name: res.fullName || cleanEmail },
+          },
+        };
+        localStorage.setItem(LOCAL_SESSION_KEY, JSON.stringify(nextSession));
+        setSession(nextSession);
+        return { data: { session: nextSession }, error: null };
       } catch (err) {
-        // Fallback demo offline jika backend belum dijalankan
-        if (
-          err instanceof TypeError ||
-          cleanEmail === DEFAULT_OWNER_EMAIL ||
-          cleanEmail === 'admin@funnellens.com' ||
-          password === 'PasswordFunnel123!'
-        ) {
-          const demoSession = {
-            access_token: 'demo-offline-token',
-            isDemo: true,
-            user: {
-              id: DEFAULT_OWNER_ID,
-              email: cleanEmail,
-              fullName: 'Owner FunnelLens (Demo)',
-              role: 'ADMIN',
-              user_metadata: { name: 'Owner FunnelLens' },
-            },
-          };
-          localStorage.setItem(LOCAL_SESSION_KEY, JSON.stringify(demoSession));
-          setSession(demoSession);
-          return { data: { session: demoSession }, error: null };
-        }
-        return { data: null, error: { message: err.message || 'Gagal masuk.' } };
+        return { data: null, error: { message: err.message || 'Gagal masuk ke server.' } };
       }
     },
-    signInDemo: () => {
-      const demoSession = {
-        access_token: 'demo-offline-token',
-        isDemo: true,
-        user: {
-          id: DEFAULT_OWNER_ID,
-          email: DEFAULT_OWNER_EMAIL,
-          fullName: 'Owner FunnelLens (Demo)',
-          role: 'ADMIN',
-          user_metadata: { name: 'Owner FunnelLens' },
-        },
-      };
-      localStorage.setItem(LOCAL_SESSION_KEY, JSON.stringify(demoSession));
-      setSession(demoSession);
-      return demoSession;
+    register: async ({ fullName, email, password, confirmPassword, tenantName, tenantAddress }) => {
+      try {
+        const res = await apiRequest('/api/auth/register', {
+          method: 'POST',
+          body: JSON.stringify({
+            fullName,
+            email: email.trim().toLowerCase(),
+            password,
+            confirmPassword,
+            tenant: {
+              name: tenantName,
+              address: tenantAddress || '-',
+            },
+          }),
+        });
+        return { data: res, error: null };
+      } catch (err) {
+        return { data: null, error: { message: err.message || 'Gagal mendaftar.' } };
+      }
     },
     signOut: async () => {
       localStorage.removeItem(LOCAL_SESSION_KEY);
