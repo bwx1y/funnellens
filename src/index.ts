@@ -1,4 +1,5 @@
 import {Elysia} from "elysia";
+import {cors} from "@elysiajs/cors";
 import openapi from "@elysia/openapi";
 import {AppError, codeForStatus} from "@shared/errors";
 import {Config} from "@/config";
@@ -21,6 +22,14 @@ for await (const file of workerGlob.scan({ cwd: import.meta.dir })) {
 }
 
 export const app = new Elysia()
+    .use(cors({
+        origin: Config.application.cors.includes(",")
+            ? Config.application.cors.split(",").map((s) => s.trim())
+            : Config.application.cors,
+        methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS", "HEAD"],
+        allowedHeaders: ["Content-Type", "Authorization", "X-Idempotency-Key"],
+        exposeHeaders: ["*"],
+    }))
     .use(httpLogger)
     // Order matters: the id runs first so every later log line and error carries it, the limiter runs
     // before the idempotency replay so a retry storm cannot bypass the budget.

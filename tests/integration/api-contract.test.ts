@@ -145,6 +145,20 @@ describe("API envelope and role contract", () => {
         });
     });
 
+    it("handles CORS preflight and includes access-control headers", async () => {
+        const response = await app.handle(new Request("http://localhost/api/auth/login", {
+            method: "OPTIONS",
+            headers: {
+                origin: "https://dashboard.example.com",
+                "access-control-request-method": "POST",
+                "access-control-request-headers": "authorization, content-type",
+            },
+        }));
+
+        expect(response.status).toBe(204);
+        expect(response.headers.get("access-control-allow-origin")).toBe("*");
+    });
+
     it("skips envelope wrapping for /docs", async () => {
         const testApp = new Elysia()
             .use(envelope)

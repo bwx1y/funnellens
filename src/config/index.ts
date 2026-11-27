@@ -13,7 +13,7 @@ export const Config = {
         mode: getEnv("NODE_ENV", "development"),
         port: parseInt(getEnv("PORT", "3000")),
         secret: getEnv("SECRET", "super_secret_default_key"),
-        cors: getEnv("CORS", "localhost"),
+        cors: getEnv("CORS", "*"),
     },
     email: {
         host: getEnv("SMTP_HOST", "localhost"),
