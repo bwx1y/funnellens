@@ -1,0 +1,1 @@
+ALTER TABLE "wa_session" ADD COLUMN "tenant_id" uuid;

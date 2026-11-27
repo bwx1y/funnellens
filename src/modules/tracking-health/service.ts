@@ -1,0 +1,286 @@
+import {requireAccountScope} from "@db/repositories/ad-account.repository";
+import {PixelSourceRepository, type PixelSource} from "@db/repositories/pixel-source.repository";
+import {SyncRunRepository} from "@db/repositories/sync-run.repository";
+import {
+    TrackingHealthRepository,
+    type TrackingHealthEvent,
+} from "@db/repositories/tracking-health.repository";
+import {round4} from "@shared/numbers";
+import {ExplanationService, type ExplanationRef} from "@/modules/explanations/service";
+import {
+    PurchaseReconciliationRepository,
+    type ReconciliationRow,
+} from "@db/repositories/purchase-reconciliation.repository";
+import {RECONCILIATION_WINDOW_DAYS} from "@/modules/reports/reconciliation.service";
+import {formatNumber, formatPercent} from "@/modules/explanations/rules";
+import {
+    DEDUP_TARGET,
+    EMQ_KEY_EVENTS,
+    EMQ_SCALE,
+    EMQ_THRESHOLD,
+    EVENT_GATE,
+    EVENT_SAMPLE_DENOMINATOR,
+    browserShare,
+    buildDataFreshness,
+    buildTrackingWarnings,
+    emqStatus,
+    eventStatus,
+    missingMatchKeys,
+    orderEventNames,
+    type DataFreshnessEntry,
+    type TrackingStatus,
+    type TrackingWarning,
+} from "@shared/tracking";
+
+export interface TrackingHealthQuery {
+    accountId: string;
+}
+
+export interface SampleBlock {
+    n: number;
+    denominator: number;
+    eligible: boolean;
+    gate: string;
+}
+
+export interface TrackingHealthResponse {
+    date: string | null;
+    pixel: {
+        connected: boolean | null;
+        pixelId: string | null;
+        name: string | null;
+        lastSeenAt: string | null;
+        browserShare: number | null;
+        note?: string;
+    };
+    capi: {
+        connected: boolean | null;
+        dedupRate: number | null;
+        target: number;
+        note?: string;
+    };
+    emq: {
+        average: number | null;
+        scale: number;
+        threshold: number;
+        status: TrackingStatus | null;
+        keyEvents: {eventName: string; matchQuality: number | null}[];
+        note?: string;
+    };
+    events: {
+        eventName: string;
+        browserCount: number | null;
+        serverCount: number | null;
+        dedupRate: number | null;
+        matchQuality: number | null;
+        status: TrackingStatus | null;
+        nextCheck: string | null;
+        note?: string;
+    }[];
+    /** The last 7 reconciled days; empty until the business records its own orders. */
+    reconciliation: ReconciliationRow[];
+    /** One row per tracked event, newest snapshot per event; key events without data are stale. */
+    dataFreshness: DataFreshnessEntry[];
+    /** Always an array, in a fixed severity order; empty when nothing needs attention. */
+    warnings: TrackingWarning[];
+    sample: SampleBlock;
+    note?: string;
+    explanation: ExplanationRef | null;
+}
+
+/** Newest pixel first; a tie falls back to the ascending pixel id so the pick is deterministic. */
+function pickPrimaryPixel(pixels: PixelSource[]): PixelSource | null {
+    let primary: PixelSource | null = null;
+
+    for (const pixel of pixels) {
+        if (primary === null) {
+            primary = pixel;
+            continue;
+        }
+
+        const current = primary.lastEventAt?.getTime() ?? null;
+        const candidate = pixel.lastEventAt?.getTime() ?? null;
+
+        if (candidate === null) continue;
+        if (current === null || candidate > current) {
+            primary = pixel;
+            continue;
+        }
+
+        if (candidate === current && pixel.pixelId < primary.pixelId) primary = pixel;
+    }
+
+    return primary;
+}
+
+function mean(values: number[]): number | null {
+    if (values.length === 0) return null;
+
+    return round4(values.reduce((sum, value) => sum + value, 0) / values.length);
+}
+
+/** Reads the match keys the sync job stored on the pixel row; an absent list claims nothing. */
+function readMatchKeys(pixel: PixelSource | null): string[] | null {
+    const raw = pixel?.raw as {automaticMatchingFields?: unknown} | null | undefined;
+    if (raw == null || !Array.isArray(raw.automaticMatchingFields)) return null;
+
+    return raw.automaticMatchingFields.map(String);
+}
+
+export class TrackingHealthService {
+    constructor(
+        private readonly pixelSourceRepo = new PixelSourceRepository(),
+        private readonly trackingHealthRepo = new TrackingHealthRepository(),
+        private readonly syncRunRepo = new SyncRunRepository(),
+        private readonly explanations = new ExplanationService(),
+        private readonly reconciliationRepo = new PurchaseReconciliationRepository()
+    ) {}
+
+    async getTrackingHealth(tenantId: string, query: TrackingHealthQuery): Promise<TrackingHealthResponse> {
+        const account = await requireAccountScope(tenantId, query.accountId);
+
+        const now = Date.now();
+        const [pixels, summary, latestPerEvent, latestSyncRun, reconciliation] = await Promise.all([
+            this.pixelSourceRepo.findByAccountId(account.id),
+            this.trackingHealthRepo.getLatestStatus(account.id),
+            this.trackingHealthRepo.getLatestPerEvent(account.id),
+            this.syncRunRepo.getLatestByAccountId(account.id),
+            this.reconciliationRepo.findRecent(account.id, RECONCILIATION_WINDOW_DAYS),
+        ]);
+
+        const pixelRow = pickPrimaryPixel(pixels);
+        const share = summary.date === null ? null : browserShare(summary.browserCount, summary.serverCount);
+
+        const pixelNote = pixelRow === null
+            ? "Pixel Meta belum tersinkron untuk akun ini."
+            : share === null
+                ? "Porsi event browser tidak tersedia."
+                : undefined;
+
+        const capiDedup = summary.dedupRate === null ? null : round4(summary.dedupRate);
+        const capiNote = pixelRow === null
+            ? "Status CAPI belum tersedia karena pixel belum tersinkron."
+            : capiDedup === null
+                ? "Rasio deduplikasi tidak tersedia karena hitungan duplikat tidak dilaporkan."
+                : undefined;
+
+        const matchKeys = readMatchKeys(pixelRow);
+        const missing = missingMatchKeys(matchKeys);
+        const rows = new Map(summary.events.map((event) => [event.eventName, event]));
+
+        const events = orderEventNames(summary.events.map((event) => event.eventName))
+            .map((eventName) => {
+                const event = rows.get(eventName) as TrackingHealthEvent;
+                const rate = event.dedupRate === null ? null : Number(event.dedupRate);
+                const matchQuality = event.matchQuality === null ? null : Number(event.matchQuality);
+                const note = eventNote(rate, matchQuality);
+
+                return {
+                    eventName,
+                    browserCount: event.browserCount,
+                    serverCount: event.serverCount,
+                    dedupRate: rate,
+                    matchQuality,
+                    status: eventStatus({dedupRate: rate, matchQuality}),
+                    nextCheck: eventName === "Lead" && missing.length > 0
+                        ? `Lengkapi parameter ${missing.join(" dan ")} pada event Lead.`
+                        : null,
+                    ...(note === undefined ? {} : {note}),
+                };
+            });
+
+        const keyEvents = EMQ_KEY_EVENTS.map((eventName) => ({
+            eventName,
+            matchQuality: events.find((event) => event.eventName === eventName)?.matchQuality ?? null,
+        }));
+        const average = mean(
+            keyEvents
+                .map((event) => event.matchQuality)
+                .filter((value): value is number => value !== null)
+        );
+
+        const dataFreshness = buildDataFreshness({
+            latest: latestPerEvent,
+            keyEvents: EMQ_KEY_EVENTS,
+            now,
+        });
+        const syncFailure = latestSyncRun?.status === "FAILED" ? {error: latestSyncRun.error} : null;
+        const warnings = buildTrackingWarnings({
+            freshness: dataFreshness,
+            keyEvents: EMQ_KEY_EVENTS,
+            emqAverage: average,
+            dedupRate: capiDedup,
+            syncFailure,
+        });
+
+        const n = summary.date === null ? 0 : summary.browserCount + summary.serverCount;
+
+        const explanation = await this.explanations.ensure({
+            tenantId,
+            accountId: account.id,
+            context: "tracking_health",
+            entityType: "account",
+            entityId: account.id,
+            filter: {},
+            snapshotId: summary.date ?? "tanpa-tanggal",
+            facts: {
+                emq: formatNumber(average),
+                dedup: formatPercent(capiDedup),
+                pixel: pixelRow === null ? "tidak terhubung" : "terhubung",
+                capi: pixelRow?.capiConfigured === true ? "terhubung" : "tidak terhubung",
+            },
+            evidenceIds: [],
+        });
+
+        return {
+            date: summary.date,
+            reconciliation,
+            dataFreshness,
+            warnings,
+            pixel: {
+                connected: pixelRow === null ? null : true,
+                pixelId: pixelRow?.pixelId ?? null,
+                name: pixelRow?.name ?? null,
+                lastSeenAt: pixelRow?.lastEventAt?.toISOString() ?? null,
+                browserShare: share,
+                ...(pixelNote === undefined ? {} : {note: pixelNote}),
+            },
+            capi: {
+                connected: pixelRow?.capiConfigured ?? null,
+                dedupRate: capiDedup,
+                target: DEDUP_TARGET,
+                ...(capiNote === undefined ? {} : {note: capiNote}),
+            },
+            emq: {
+                average,
+                scale: EMQ_SCALE,
+                threshold: EMQ_THRESHOLD,
+                status: emqStatus(average),
+                keyEvents,
+                ...(average === null
+                    ? {note: "Event Match Quality belum tersedia untuk Lead dan Purchase."}
+                    : {}),
+            },
+            events,
+            sample: {
+                n,
+                denominator: EVENT_SAMPLE_DENOMINATOR,
+                eligible: n >= EVENT_SAMPLE_DENOMINATOR,
+                gate: EVENT_GATE,
+            },
+            ...(events.length === 0 ? {note: "Statistik event tidak tersedia untuk akun ini."} : {}),
+            explanation,
+        };
+    }
+}
+
+/** Names what is missing without claiming a cause. */
+function eventNote(dedupRate: number | null, matchQuality: number | null): string | undefined {
+    if (dedupRate === null && matchQuality === null) {
+        return "Rasio deduplikasi tidak tersedia. Event Match Quality tidak tersedia.";
+    }
+    if (dedupRate === null) return "Rasio deduplikasi tidak tersedia.";
+    if (matchQuality === null) return "Event Match Quality tidak tersedia.";
+
+    return undefined;
+}

@@ -1,0 +1,198 @@
+import {WorkerManager, type Job} from "@infra/queue";
+import {
+    META_SYNC_QUEUE_NAME,
+    type MetaSyncJobData,
+    type MetaSyncHourlyBreakdownsJobPayload,
+    type MetaSyncJobName,
+    type MetaSyncTrailingJobPayload,
+} from "./queue";
+import {MetaService} from "./service";
+import {PixelStatsSyncService} from "./pixel-stats.service";
+import {MetaSyncDeadLetter} from "./dead-letter";
+import {MetaTokenRefreshService} from "./token-refresh.service";
+import {PurchaseReconciliationService} from "@/modules/reports/reconciliation.service";
+import {MetaConnectionRepository} from "@db/repositories/meta-connection.repository";
+import {AdAccountRepository} from "@db/repositories/ad-account.repository";
+import {AggregationCache} from "@infra/cache";
+import {logger} from "@shared/logger";
+
+export class MetaSyncWorkerProcessor {
+    constructor(
+        private readonly metaService = new MetaService(),
+        private readonly metaConnectionRepo = new MetaConnectionRepository(),
+        private readonly adAccountRepo = new AdAccountRepository(),
+        private readonly pixelStatsService = new PixelStatsSyncService(),
+        private readonly cache = new AggregationCache(),
+        private readonly deadLetter = new MetaSyncDeadLetter(),
+        private readonly tokenRefresh = new MetaTokenRefreshService(),
+        private readonly reconciliation = new PurchaseReconciliationService()
+    ) {}
+
+    async process(job: Job<MetaSyncJobData, void, MetaSyncJobName>): Promise<void> {
+        logger.info({jobId: job.id, jobName: job.name, data: job.data}, "Processing Meta sync job");
+
+        try {
+            if (job.name === "sync-daily") {
+                await this.handleDailySync(job.data);
+            } else if (job.name === "re-sync-trailing") {
+                await this.handleTrailingSync(job.data as MetaSyncTrailingJobPayload);
+            } else if (job.name === "sync-master") {
+                await this.handleMasterSync(job.data);
+            } else if (job.name === "sync-hourly-breakdowns") {
+                await this.handleHourlyBreakdownSync(job.data as MetaSyncHourlyBreakdownsJobPayload);
+            } else if (job.name === "sync-pixel-stats") {
+                await this.handlePixelStatsSync(job.data);
+            } else if (job.name === "refresh-meta-tokens") {
+                await this.tokenRefresh.refreshExpiring();
+            } else if (job.name === "reconcile-purchases") {
+                await this.reconciliation.reconcileAll();
+            } else {
+                logger.warn({jobName: job.name}, "Unknown Meta sync job name");
+            }
+        } catch (error: unknown) {
+            // Check for rate limit error codes from Meta Graph API
+            const err = error as { code?: number; status?: number; message?: string };
+            const isRateLimit =
+                err.code === 17 ||
+                err.code === 32 ||
+                err.code === 613 ||
+                err.status === 429 ||
+                (err.message && err.message.toLowerCase().includes("rate limit"));
+
+            if (isRateLimit) {
+                logger.warn({jobId: job.id, error}, "Meta API rate limit encountered. Triggering BullMQ retry backoff.");
+            } else {
+                logger.error({jobId: job.id, error}, "Meta sync job failed");
+            }
+
+            throw error;
+        }
+    }
+
+    private async handleDailySync(data: MetaSyncJobData): Promise<void> {
+        const targets = await this.resolveSyncTargets(data);
+        const today = new Date();
+        const yesterday = new Date(Date.now() - 24 * 60 * 60 * 1000);
+        const since = yesterday.toISOString().slice(0, 10);
+        const until = today.toISOString().slice(0, 10);
+
+        for (const target of targets) {
+            await this.syncInsightsFor(target, {since, until});
+        }
+    }
+
+    private async handleTrailingSync(data: MetaSyncTrailingJobPayload): Promise<void> {
+        const targets = await this.resolveSyncTargets(data);
+        const daysBack = data.daysBack ?? 28;
+        const today = new Date();
+        const trailingDate = new Date(Date.now() - daysBack * 24 * 60 * 60 * 1000);
+        const since = trailingDate.toISOString().slice(0, 10);
+        const until = today.toISOString().slice(0, 10);
+
+        for (const target of targets) {
+            await this.syncInsightsFor(target, {since, until});
+        }
+    }
+
+    /** One insight sync with its bookkeeping: success clears the account error, failure records it. */
+    private async syncInsightsFor(
+        target: {userId: string; tenantId: string; accountId: string},
+        range: {since: string; until: string}
+    ): Promise<void> {
+        try {
+            await this.metaService.syncInsights(
+                {iss: target.userId, tenantId: target.tenantId},
+                {accountId: target.accountId, ...range, includeBreakdowns: true}
+            );
+            await this.refreshAfterSync(target.accountId);
+        } catch (error) {
+            await this.recordSyncFailure(target.accountId, error instanceof Error ? error.message : String(error));
+            throw error;
+        }
+    }
+
+    private async handleHourlyBreakdownSync(data: MetaSyncHourlyBreakdownsJobPayload): Promise<void> {
+        const targets = await this.resolveSyncTargets(data);
+        const until = data.until ?? new Date().toISOString().slice(0, 10);
+        const since = data.since ?? new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+
+        for (const target of targets) {
+            await this.metaService.syncHourlyBreakdowns(
+                {iss: target.userId, tenantId: target.tenantId},
+                {accountId: target.accountId, since, until}
+            );
+        }
+    }
+
+    private async handlePixelStatsSync(data: MetaSyncJobData): Promise<void> {
+        const targets = await this.resolveSyncTargets(data);
+        for (const target of targets) {
+            await this.pixelStatsService.sync(target.tenantId, target.accountId);
+        }
+    }
+
+    private async handleMasterSync(data: MetaSyncJobData): Promise<void> {
+        const targets = await this.resolveSyncTargets(data);
+        for (const target of targets) {
+            await this.metaService.syncMaster(
+                {iss: target.userId, tenantId: target.tenantId},
+                {accountId: target.accountId}
+            );
+        }
+    }
+
+    /**
+     * After a successful insight sync: fresh numbers invalidate every cached aggregation, the failure
+     * alert the dead letter opened is obsolete, and `ad_accounts` records the run so `/api/sources` can
+     * answer without scanning `sync_runs`. All best-effort — the sync itself already succeeded.
+     */
+    async refreshAfterSync(accountId: string): Promise<void> {
+        await this.cache.invalidateAccount(accountId);
+        await this.deadLetter.clearAlert(accountId);
+        await this.adAccountRepo.recordSyncOutcome(accountId, {at: new Date(), error: null});
+    }
+
+    /** A failed run leaves its message on the account: that is what `/api/sources` reports as lastError. */
+    async recordSyncFailure(accountId: string, message: string): Promise<void> {
+        await this.adAccountRepo.recordSyncOutcome(accountId, {at: null, error: message});
+    }
+
+    private async resolveSyncTargets(data: MetaSyncJobData): Promise<{ userId: string; tenantId: string; accountId: string }[]> {
+        // If specific tenant/account/user is provided in job payload
+        if (data.userId && data.tenantId && data.accountId) {
+            return [{userId: data.userId, tenantId: data.tenantId, accountId: data.accountId}];
+        }
+
+        // Otherwise resolve all active selected accounts across all connections
+        const connections = await this.metaConnectionRepo.findActiveConnections();
+        const targets: { userId: string; tenantId: string; accountId: string }[] = [];
+
+        for (const conn of connections) {
+            if (data.tenantId && conn.tenantId !== data.tenantId) continue;
+            if (data.userId && conn.userId !== data.userId) continue;
+
+            const selectedAcc = await this.adAccountRepo.findSelectedByTenantId(conn.tenantId);
+            if (selectedAcc) {
+                targets.push({
+                    userId: conn.userId,
+                    tenantId: conn.tenantId,
+                    accountId: selectedAcc.id,
+                });
+            }
+        }
+
+        return targets;
+    }
+}
+
+const processor = new MetaSyncWorkerProcessor();
+
+export const metaSyncWorker = new WorkerManager<MetaSyncJobData, void, MetaSyncJobName>(
+    META_SYNC_QUEUE_NAME,
+    async (job) => processor.process(job),
+    undefined,
+    // Only a job that burned its whole attempt budget lands here; BullMQ has already stopped retrying.
+    async (job, error) => {
+        await new MetaSyncDeadLetter().record(job.name, job.data, error.message, job.attemptsMade);
+    }
+);

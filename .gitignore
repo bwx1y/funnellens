@@ -1,12 +1,45 @@
+# Dependencies
 node_modules/
 backend/node_modules/
+.pnp
+.pnp.js
+
+# Local environment and secrets
+.env
+.env.*
+!.env.example
 backend/.env
 backend/.env.*
 !backend/.env.example
+
+# Build and test output
 dist/
-.sites-runtime/
-.env*
-!.env.example
-*.log
+build/
+coverage/
+out/
+.next/
 test-results/
+
+# Runtime data
+log/
+*.log
+*.trace
+*.zip
+*.tar.gz
+*.tgz
+backup/
+graphify-out/
+.sites-runtime/
+
+# IDE and OS
+.idea/
+.vscode/
+*.swp
+*.swo
 .DS_Store
+*.pem
+
+# Package-manager lockfiles for unused managers
+.pnp.*
+yarn.lock
+pnpm-lock.yaml

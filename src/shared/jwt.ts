@@ -1,0 +1,103 @@
+import {Config} from "@/config";
+import {Elysia} from "elysia";
+import {UnauthorizedError} from "./errors";
+import {SignJWT, jwtVerify, type JWTPayload} from "jose";
+import {roleEnum} from "@db/schema/core/user.entity";
+interface Payload extends JWTPayload {
+    role: typeof roleEnum.enumValues[number]
+    sid?: string
+    ids?: string
+    tenantId?: string
+}
+
+/**
+ * The context `JwtUtil.isAuthenticated` derives. Global plugins run before any route, so their context
+ * type does not include it; they read it through this type instead of `any`.
+ */
+export interface AuthenticatedUser {
+    iss: string
+    sid: string
+    tenantId: string
+    role: typeof roleEnum.enumValues[number]
+}
+
+export class JwtUtil {
+    private static readonly JWT_SECRET = new TextEncoder().encode(Config.application.secret);
+
+    static readonly isAuthenticated = new Elysia()
+        .derive({ as: "scoped" }, async ({headers: {authorization}}): Promise<{
+            user: AuthenticatedUser
+        }> => {
+            if (!authorization || !authorization.startsWith("Bearer ")) {
+                throw new UnauthorizedError("Token not found");
+            }
+
+            const token = authorization.split(" ")[1];
+            try {
+                const {payload} = await jwtVerify(token, JwtUtil.JWT_SECRET) as { payload: Payload };
+
+                if (!payload || payload.iss == undefined) {
+                    throw new UnauthorizedError("Your token is exp");
+                }
+
+                const tenantId = (payload.tenantId ?? payload.ids ?? payload.sid ?? "") as string;
+                return {
+                    user: {
+                        iss: payload.iss,
+                        sid: tenantId,
+                        tenantId: tenantId,
+                        role: payload.role
+                    }
+                }
+            } catch (e) {
+                if (e instanceof UnauthorizedError) throw e;
+                throw new UnauthorizedError("Your token is exp");
+            }
+        })
+
+    static async signOAuthState(value: { userId: string; tenantId: string }): Promise<string> {
+        return new SignJWT({tenantId: value.tenantId, purpose: "meta_oauth"})
+            .setProtectedHeader({alg: "HS256"})
+            .setSubject(value.userId)
+            .setIssuedAt()
+            .setExpirationTime("10m")
+            .sign(JwtUtil.JWT_SECRET);
+    }
+
+    static async verifyOAuthState(token: string): Promise<{ userId: string; tenantId: string }> {
+        let payload: JWTPayload;
+        try {
+            ({payload} = await jwtVerify(token, JwtUtil.JWT_SECRET));
+        } catch {
+            throw new UnauthorizedError("Invalid or expired OAuth state");
+        }
+
+        if (payload.purpose !== "meta_oauth" || typeof payload.sub !== "string" || typeof payload.tenantId !== "string") {
+            throw new UnauthorizedError("Invalid OAuth state");
+        }
+
+        return {userId: payload.sub, tenantId: payload.tenantId};
+    }
+
+    async register(value: { id: string, tenant: string, role: typeof roleEnum.enumValues[number] }) {
+        const expiresIn = 7 * 24 * 60 * 60;
+        const expTimestamp = Math.floor(Date.now() / 1000) + expiresIn;
+
+        const payload = {
+            iss: value.id,
+            ids: value.tenant,
+            sid: value.tenant,
+            tenantId: value.tenant,
+            role: value.role,
+        }
+        const token = await new SignJWT(payload)
+            .setProtectedHeader({alg: 'HS256'})
+            .setExpirationTime(expTimestamp)
+            .sign(JwtUtil.JWT_SECRET);
+
+        return {
+            key: token,
+            exp: expTimestamp
+        }
+    }
+}

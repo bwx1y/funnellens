@@ -1,6 +1,6 @@
 {
-  "name": "funnellens-prototype",
-  "version": "1.0.0",
+  "name": "funnellens",
+  "version": "1.0.50",
   "private": true,
   "type": "module",
   "scripts": {
@@ -8,20 +8,52 @@
     "build": "vite build",
     "preview": "vite preview --host 127.0.0.1",
     "test": "node --test tests/*.test.js",
-    "backend:dev": "bun --cwd backend run dev",
-    "backend:test": "cd backend && bun test tests/unit"
+    "backend:dev": "bun run --watch src/index.ts",
+    "backend:nested:dev": "bun --cwd backend run dev",
+    "backend:test": "bun test tests/unit",
+    "db:generate": "drizzle-kit generate",
+    "db:push": "drizzle-kit push",
+    "db:drop": "bun run scripts/db-drop.ts",
+    "db:seed": "bun run scripts/seed-demo.ts",
+    "db:backup": "bun run scripts/backup.ts",
+    "db:migrate-secrets": "bun run scripts/migrate-secrets.ts",
+    "db:reset": "bun run scripts/db-drop.ts && drizzle-kit push --force",
+    "db:studio": "drizzle-kit studio"
   },
   "dependencies": {
+    "@elysia/openapi": "^1.4.17",
+    "@elysiajs/cors": "^1.4.3",
+    "@google/genai": "^3.3.0",
+    "@rmyndharis/openwa": "^0.11.0",
     "@supabase/ssr": "^0.12.7",
     "@supabase/supabase-js": "^2.57.0",
+    "@toon-format/toon": "^4.4.0",
+    "bullmq": "^6.7.1",
+    "drizzle-orm": "^0.45.4",
+    "drizzle-typebox": "^0.3.3",
+    "elysia": "latest",
+    "facebook-nodejs-business-sdk": "^26.0.3",
+    "ioredis": "^6.0.0",
+    "jose": "^6.2.15",
     "lucide-react": "^0.468.0",
+    "nodemailer": "^10.3.1",
+    "pg": "^8.23.1",
+    "pino": "^10.4.0",
+    "pino-pretty": "^13.2.0",
+    "pino-roll": "^4.0.0",
+    "postgres": "^4.0.0",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
     "react-router-dom": "^6.28.0",
     "recharts": "^2.15.0"
   },
   "devDependencies": {
+    "@types/facebook-nodejs-business-sdk": "^24.0.0",
+    "@types/nodemailer": "^8.0.2",
     "@vitejs/plugin-react": "^4.3.4",
+    "@types/pg": "^8.23.1",
+    "bun-types": "^1.4.4",
+    "drizzle-kit": "^0.31.11",
     "vite": "^6.1.0"
   }
 }

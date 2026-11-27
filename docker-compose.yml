@@ -1,74 +1,107 @@
 services:
-  db:
-    image: pgvector/pgvector:pg16
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: funnellens-api
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:${PORT:-3000}:3000"
+    environment:
+      - NODE_ENV=${NODE_ENV:-development}
+      - PORT=3000
+      - SECRET=${SECRET:-replace-with-a-long-random-secret}
+      - CORS=${CORS:-localhost,127.0.0.1}
+      - FRONTEND_URL=${FRONTEND_URL:-http://127.0.0.1:5173}
+      - DATABASE_HOST=postgres
+      - DATABASE_PORT=5432
+      - DATABASE_NAME=${DATABASE_NAME:-db_testing}
+      - DATABASE_USER=${DATABASE_USER:-postgres}
+      - DATABASE_PASSWORD=${DATABASE_PASSWORD:-replace-me}
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - REDIS_PASSWORD=${REDIS_PASSWORD:-}
+      - REDIS_DB=${REDIS_DB:-0}
+      - SMTP_HOST=${SMTP_HOST:-}
+      - SMTP_PORT=${SMTP_PORT:-587}
+      - SMTP_USER=${SMTP_USER:-}
+      - SMTP_PASS=${SMTP_PASS:-}
+      - SMTP_SECURE=${SMTP_SECURE:-false}
+      - MAIL_FROM=${MAIL_FROM:-noreply@localhost}
+      - OPEN_WA_URL=http://open_wa:2785
+      - OPEN_WA_APP_KEY=${OPEN_WA_APP_KEY:-}
+      - OPEN_WA_WEBHOOK_URL=${OPEN_WA_WEBHOOK_URL:-http://host.docker.internal:3000/api/wa/webhook}
+      - META_APP_ID=${META_APP_ID:-}
+      - META_APP_SECRET=${META_APP_SECRET:-}
+      - META_REDIRECT_URI=${META_REDIRECT_URI:-http://localhost:3000/api/meta/oauth/callback}
+      - META_API_VERSION=${META_API_VERSION:-v21.0}
+      - META_OAUTH_SCOPES=${META_OAUTH_SCOPES:-ads_read,ads_management}
+      - GEMINI_API_KEYS=${GEMINI_API_KEYS:-}
+      - GEMINI_MODEL=${GEMINI_MODEL:-gemini-2.5-flash}
+    volumes:
+      - ./log:/app/log
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  postgres:
+    image: postgres:16-alpine
+    container_name: funnellens-postgres
     restart: unless-stopped
     environment:
-      POSTGRES_DB: ${POSTGRES_DB:-funnellens_mvp}
-      POSTGRES_USER: ${POSTGRES_USER:-funnellens_migrate}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-dev-only-change-me}
+      POSTGRES_USER: ${DATABASE_USER:-postgres}
+      POSTGRES_PASSWORD: ${DATABASE_PASSWORD:-replace-me}
+      POSTGRES_DB: ${DATABASE_NAME:-db_testing}
     ports:
-      - "127.0.0.1:${POSTGRES_PORT:-5432}:5432"
+      - "127.0.0.1:${DATABASE_PORT:-5432}:5432"
     volumes:
-      - funnellens-postgres:/var/lib/postgresql/data
+      - postgres_data:/var/lib/postgresql/data
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
       interval: 5s
       timeout: 5s
       retries: 10
 
-  api:
-    build: ./backend
+  redis:
+    image: redis:7-alpine
+    container_name: funnellens-redis
     restart: unless-stopped
-    env_file:
-      - ./backend/.env
-    environment:
-      DATABASE_URL: postgres://${API_DATABASE_USER:-funnellens_api}:${API_DATABASE_PASSWORD:-local-only-change-me}@db:5432/${POSTGRES_DB:-funnellens_mvp}
-      HOST: 0.0.0.0
-      OLLAMA_BASE_URL: http://ollama:11434
-      OPENWA_BASE_URL: http://openwa:8080
-      OPENWA_API_TOKEN: ${OPENWA_API_TOKEN:-dev-openwa-token-change-me}
-      OPENWA_WEBHOOK_SECRET: ${OPENWA_WEBHOOK_SECRET:-dev-openwa-webhook-secret-change-me}
     ports:
-      - "127.0.0.1:${API_PORT:-3000}:3000"
-    depends_on:
-      db:
-        condition: service_healthy
+      - "127.0.0.1:${REDIS_PORT:-6379}:6379"
+    volumes:
+      - redis_data:/data
     healthcheck:
-      test: ["CMD", "bun", "-e", "fetch('http://127.0.0.1:3000/ready').then(r => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))"]
-      interval: 10s
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
       timeout: 5s
       retries: 5
 
-  ollama:
-    image: ollama/ollama
-    profiles: ["ai"]
-    restart: unless-stopped
-    ports:
-      - "127.0.0.1:11434:11434"
-    volumes:
-      - funnellens-ollama:/root/.ollama
-
-  openwa:
-    image: openwa/wa-automate:latest
+  open_wa:
+    image: rmyndharis/openwa:latest
+    container_name: funnellens-openwa
     profiles: ["whatsapp"]
-    init: true
     restart: unless-stopped
-    environment:
-      WA_PORT: "8080"
-      WA_HOST: 0.0.0.0
-      WA_SESSION_ID: funnellens
-      WA_USER_DATA_DIR: /sessions/funnellens
-      WA_API_KEY: ${OPENWA_API_TOKEN:-dev-openwa-token-change-me}
-      OPENWA_WEBHOOK_SECRET: ${OPENWA_WEBHOOK_SECRET:-dev-openwa-webhook-secret-change-me}
-      W_A_V: 5.6.6
-    command: ["--config", "/config/wa.config.mjs", "--session-id", "funnellens", "--host", "0.0.0.0", "--port", "8080"]
-    volumes:
-      - funnellens-openwa:/sessions
-      - ./backend/openwa/wa.config.mjs:/config/wa.config.mjs:ro
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     ports:
-      - "127.0.0.1:8000:8080"
+      - "127.0.0.1:${OPEN_WA_PORT:-2785}:2785"
+    environment:
+      - SERVE_DASHBOARD=false
+      - ENABLE_SWAGGER=true
+      - ENGINE_TYPE=baileys
+      - SSRF_ALLOWED_HOSTS=host.docker.internal
+    volumes:
+      - open_wa_data:/app/data
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:2785/api/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
 
 volumes:
-  funnellens-postgres:
-  funnellens-ollama:
-  funnellens-openwa:
+  postgres_data:
+  redis_data:
+  open_wa_data:
