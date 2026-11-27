@@ -35,8 +35,8 @@ export const WaCloudController = new Elysia({
             description: "Echoes `hub.challenge` when `hub.mode` is `subscribe` and `hub.verify_token` matches WA_VERIFY_TOKEN."
         }
     })
-    .post("/webhook", async ({request, cloudIngestService}) => {
-        const raw = await request.text();
+    .post("/webhook", async ({body, request, cloudIngestService}) => {
+        const raw = typeof body === "string" ? body : JSON.stringify(body);
 
         if (!cloudIngestService.signatureConfigured) {
             throw new UnauthorizedError("Webhook signature tidak dapat diverifikasi");
@@ -50,6 +50,7 @@ export const WaCloudController = new Elysia({
 
         return {status: true};
     }, {
+        parse: "text",
         detail: {
             summary: "Receive a WhatsApp Cloud API webhook delivery",
             description: "Verifies X-Hub-Signature-256 (HMAC-SHA256 of the raw body) and queues the payload for ingestion."
