@@ -17,12 +17,7 @@ const WEBHOOK_FILTERS: WebhookFilters = {
     conditions: [
         {
             field: "isGroup",
-            operator: "equals",
-            value: false,
-        },
-        {
-            field: "isStatusBroadcast",
-            operator: "equals",
+            operator: "is",
             value: false,
         },
     ],

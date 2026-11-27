@@ -84,6 +84,7 @@ services:
     environment:
       - SERVE_DASHBOARD=false
       - ENABLE_SWAGGER=true
+      - ENGINE_TYPE=baileys
       # webhook delivery back to the ho\st Elysia; the SSRF guard blocks private targets otherwise
       - SSRF_ALLOWED_HOSTS=host.docker.internal
     volumes:
