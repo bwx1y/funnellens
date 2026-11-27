@@ -169,6 +169,13 @@
       "when": 1795789471629,
       "tag": "0023_foamy_sir_ram",
       "breakpoints": true
+    },
+    {
+      "idx": 24,
+      "version": "7",
+      "when": 1795788974321,
+      "tag": "0024_fat_sugar_man",
+      "breakpoints": true
     }
   ]
 }

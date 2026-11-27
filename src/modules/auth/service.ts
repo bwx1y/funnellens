@@ -1,12 +1,14 @@
 import {UserRepository} from "@db/repositories/user.repository";
 import {TenantRepository} from "@db/repositories/tenant.repository";
 import {UserTokenRepository} from "@db/repositories/user-token.repository";
+import {RefreshTokenRepository} from "@db/repositories/refresh-token.repository";
 import {AuthSchema} from "@/modules/auth/schema";
-import {BadRequestError} from "@shared/errors";
+import {BadRequestError, UnauthorizedError} from "@shared/errors";
 import {JwtUtil} from "@shared/jwt";
 import {PasswordUtil} from "@shared/password";
 import {QueueManager} from "@infra/queue";
 import type {SendEmailTokenJob} from "@/modules/auth/worker";
+import {roleEnum} from "@db/schema/core/user.entity";
 
 export class AuthService {
     static readonly QUEUE_NAME = "email-queue";
@@ -14,8 +16,32 @@ export class AuthService {
     private readonly userRepository = new UserRepository();
     private readonly tenantRepository = new TenantRepository();
     private readonly userTokenRepository = new UserTokenRepository();
+    private readonly refreshTokenRepository = new RefreshTokenRepository();
     private readonly jwtUtil = new JwtUtil();
     private readonly emailQueue = new QueueManager<SendEmailTokenJob>(AuthService.QUEUE_NAME);
+
+    private async issueTokens(user: { id: string; role: typeof roleEnum.enumValues[number] }, tenantId: string) {
+        const accessToken = await this.jwtUtil.register({
+            id: user.id,
+            tenant: tenantId,
+            role: user.role,
+        }, 15 * 60);
+
+        const rawRefreshToken = crypto.randomUUID().replace(/-/g, "") + crypto.randomUUID().replace(/-/g, "");
+        const expiresAt = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000);
+
+        await this.refreshTokenRepository.create({
+            token: rawRefreshToken,
+            userId: user.id,
+            expiresAt,
+        });
+
+        return {
+            key: accessToken.key,
+            exp: accessToken.exp,
+            refreshToken: rawRefreshToken,
+        };
+    }
 
     async login(body: AuthSchema["login"]) {
         const entity = await this.userRepository.findOneByEmail(body.email)
@@ -28,11 +54,10 @@ export class AuthService {
             throw new BadRequestError("Passwords do not match");
         }
 
-        const token = await this.jwtUtil.register({
-            id: entity.user.id,
-            tenant: entity.tenant.id,
-            role: entity.user.role ?? "ADMIN"
-        })
+        const token = await this.issueTokens(
+            { id: entity.user.id, role: entity.user.role ?? "ADMIN" },
+            entity.tenant.id
+        );
 
         return {
             id: entity.user.id,
@@ -47,6 +72,7 @@ export class AuthService {
                 address: entity.tenant.address,
             },
             token: token,
+            refreshToken: token.refreshToken,
         }
     }
 
@@ -90,11 +116,10 @@ export class AuthService {
         });
 
 
-        const token = await this.jwtUtil.register({
-            role: entityUser.role!,
-            tenant: entityTenant.id,
-            id: entityUser.id,
-        })
+        const token = await this.issueTokens(
+            { id: entityUser.id, role: entityUser.role! },
+            entityTenant.id
+        );
 
         return {
             id: entityUser.id,
@@ -109,7 +134,39 @@ export class AuthService {
                 address: entityTenant.address,
             },
             token: token,
+            refreshToken: token.refreshToken,
         }
+    }
+
+    async refresh(body: AuthSchema["refresh"]) {
+        const tokenEntity = await this.refreshTokenRepository.findValid(body.refreshToken);
+        if (!tokenEntity) {
+            throw new UnauthorizedError("Invalid or expired refresh token");
+        }
+
+        await this.refreshTokenRepository.revoke(body.refreshToken);
+
+        const entity = await this.userRepository.findOneById(tokenEntity.userId);
+        if (!entity) {
+            throw new UnauthorizedError("User not found");
+        }
+
+        const token = await this.issueTokens(
+            { id: entity.user.id, role: entity.user.role ?? "ADMIN" },
+            entity.tenant.id
+        );
+
+        return {
+            token: token,
+            refreshToken: token.refreshToken,
+        };
+    }
+
+    async logout(body: AuthSchema["logout"]) {
+        await this.refreshTokenRepository.revoke(body.refreshToken);
+        return {
+            success: true,
+        };
     }
 
     async forgotPassword(body: AuthSchema["forgotPassword"]) {

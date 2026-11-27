@@ -4,6 +4,7 @@ export * from "./enums";
 export * from "./core/tenant.entity";
 export * from "./core/user.entity";
 export * from "./core/user-token.entity";
+export * from "./core/refresh-token.entity";
 
 // Ads
 export * from "./ads/ad-account.entity";

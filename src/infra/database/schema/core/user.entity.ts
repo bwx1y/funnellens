@@ -2,6 +2,7 @@ import {pgTable, timestamp, uuid, varchar} from "drizzle-orm/pg-core";
 import {relations} from "drizzle-orm";
 import {TenantEntity} from "@db/schema/core/tenant.entity";
 import {UserTokenEntity} from "@db/schema/core/user-token.entity";
+import {RefreshTokenEntity} from "@db/schema/core/refresh-token.entity";
 import {userRoleEnum} from "@db/schema/enums";
 
 export {userRoleEnum as roleEnum};
@@ -21,5 +22,6 @@ export const UserRelationship = relations(UserEntity, ({one, many}) => ({
         fields: [UserEntity.tenantId],
         references: [TenantEntity.id]
     }),
-    tokens: many(UserTokenEntity)
+    tokens: many(UserTokenEntity),
+    refreshTokens: many(RefreshTokenEntity)
 }));

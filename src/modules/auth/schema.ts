@@ -82,6 +82,18 @@ export const AuthSchema = {
             pattern: "^[\\w-\\.]+@([\\w-]+\\.)+[\\w-]{2,4}$",
             error: "email type must be email address"
         })
+    }),
+    refresh: t.Object({
+        refreshToken: t.String({
+            minLength: 1,
+            error: "refreshToken must not be empty"
+        })
+    }),
+    logout: t.Object({
+        refreshToken: t.String({
+            minLength: 1,
+            error: "refreshToken must not be empty"
+        })
     })
 } as const
 

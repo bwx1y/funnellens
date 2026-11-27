@@ -79,8 +79,7 @@ export class JwtUtil {
         return {userId: payload.sub, tenantId: payload.tenantId};
     }
 
-    async register(value: { id: string, tenant: string, role: typeof roleEnum.enumValues[number] }) {
-        const expiresIn = 7 * 24 * 60 * 60;
+    async register(value: { id: string, tenant: string, role: typeof roleEnum.enumValues[number] }, expiresIn = 7 * 24 * 60 * 60) {
         const expTimestamp = Math.floor(Date.now() / 1000) + expiresIn;
 
         const payload = {

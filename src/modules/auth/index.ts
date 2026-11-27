@@ -72,3 +72,21 @@ export const AuthController = new Elysia({
             }
         }
     )
+    .post("/refresh",
+        async ({body, authService}) => authService.refresh(body),
+        {
+            body: AuthSchema.refresh,
+            detail: {
+                summary: "Refresh access token using refresh token"
+            }
+        }
+    )
+    .post("/logout",
+        async ({body, authService}) => authService.logout(body),
+        {
+            body: AuthSchema.logout,
+            detail: {
+                summary: "Revoke refresh token on logout"
+            }
+        }
+    )
