@@ -1,6 +1,8 @@
 import {afterAll, beforeAll, describe, expect, it} from "bun:test";
+import {Elysia} from "elysia";
 import {app} from "@/index";
 import {Config} from "@/config";
+import {envelope} from "@/plugins/envelope.plugin";
 import {db} from "@db/index";
 import {DatabaseRepository} from "@db/repositories/base.repository";
 import {TenantRepository} from "@db/repositories/tenant.repository";
@@ -141,6 +143,22 @@ describe("API envelope and role contract", () => {
             message: "Invalid JSON format",
             details: null,
         });
+    });
+
+    it("skips envelope wrapping for /docs", async () => {
+        const testApp = new Elysia()
+            .use(envelope)
+            .get("/docs", () => new Response("<h1>docs</h1>", {headers: {"content-type": "text/html"}}))
+            .get("/docs/json", () => ({openapi: "3.1.0"}));
+
+        const docs = await testApp.handle(new Request("http://localhost/docs"));
+        expect(docs.status).toBe(200);
+        expect(await docs.text()).toBe("<h1>docs</h1>");
+
+        const spec = await testApp.handle(new Request("http://localhost/docs/json"));
+        expect(spec.status).toBe(200);
+        const json = await spec.json() as Record<string, unknown>;
+        expect(json).toEqual({openapi: "3.1.0"});
     });
 
     it("echoes hub.challenge as plain text, never as an envelope", async () => {

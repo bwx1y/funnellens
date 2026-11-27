@@ -7,6 +7,7 @@ import {isCacheHit} from "@shared/request-context";
  * webhooks by reading the body verbatim, and probes must answer with a bare status payload.
  */
 const SKIP_PREFIXES = [
+    "/docs",
     "/api/wa/cloud/webhook",
     "/api/wa/webhook",
     // Both probes are read by an orchestrator that only understands a bare status payload.
