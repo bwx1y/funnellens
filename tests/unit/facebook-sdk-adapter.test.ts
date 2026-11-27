@@ -113,8 +113,10 @@ describe("FacebookSdkAdapter", () => {
 
         expect(calls.length).toBe(1);
         const [fields, params] = calls[0];
-        expect(fields).toContain("action_report_time");
-        expect(fields).toContain("video_3_sec_watched_actions");
+        expect(fields).toContain("spend");
+        expect(fields).toContain("video_thruplay_watched_actions");
+        expect(fields).not.toContain("action_report_time");
+        expect(fields).not.toContain("video_3_sec_watched_actions");
         expect(params.level).toBe("ad");
         expect(params.time_increment).toBe(1);
 
