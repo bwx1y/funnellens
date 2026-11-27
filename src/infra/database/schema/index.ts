@@ -34,6 +34,5 @@ export * from "./wa/conversation-message.entity";
 export * from "./wa/lead.entity";
 export * from "./wa/lead-assessment.entity";
 export * from "./wa/lead-milestone.entity";
-export * from "./wa/wa-message.entity";
 export * from "./wa/wa-phone.entity";
 export * from "./wa/wa-session.entity";

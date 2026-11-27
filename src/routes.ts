@@ -5,7 +5,6 @@ import {UserController} from "@/modules/user";
 import {WaSessionController} from "@/modules/wa/session";
 import {WaWebhookController} from "@/modules/wa/webhook";
 import {WaCloudController} from "@/modules/wa/cloud";
-import {WaContactController} from "@/modules/wa/contact";
 import {MetaController, MetaOAuthController} from "@/modules/meta";
 import {AnalyticsController} from "@/modules/analytics";
 import {AudienceController, LeadController} from "@/modules/audience";
@@ -30,7 +29,6 @@ export const routes = new Elysia({
     .use(WaSessionController)
     .use(WaWebhookController)
     .use(WaCloudController)
-    .use(WaContactController)
     .use(MetaOAuthController)
     .use(MetaController)
     .use(AnalyticsController)
